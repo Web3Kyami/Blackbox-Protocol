@@ -1,8 +1,15 @@
-# HANDOFF — Next Task: value-axis design decision (strategy-reported → enforced)
+# HANDOFF — Next Task: value-axis design DECISION (doc ready, awaiting Kyami)
+
+**Decision doc:** `docs/VALUE-AXIS-OPTIONS.md` — options A/B/C compared, **B
+(attested float) recommended**. Nothing further builds until Kyami picks.
+After approval, execution order: B's contract changes + tests → glibc scarb
+suite green → declare (~40 STRK, request approval) → honest round v5 →
+extended crosscheck → docs.
 
 ## Read first (in order)
 1. `AGENTS.md` (root) — engineering rules
-2. `docs/STATUS.md` — "Honest round v4" section is current state
+2. `docs/VALUE-AXIS-OPTIONS.md` — THE pending decision
+3. `docs/STATUS.md` — "Honest round v4" section is current truth
 3. Skills: `web3/blackbox-arena`, `web3/starknet-sdk-pitfalls`, `web3/onchain-verify-not-logs`
 4. `contracts/src/arena.cairo` (scorer + escrow) and `packages/strategy-adapter` semantics
 
