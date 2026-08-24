@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+!.env.example
+target/
+.snfoundry_cache/
+deployments/*.local.json
+evidence/private/
+_research/
+*.log
+.local/
+
+

@@ -1,0 +1,55 @@
+{
+  "network": "sepolia",
+  "chain_id": "SN_SEPOLIA",
+  "sponsor": "0x6e033247946057e03852661496b729323918320ba0751421c6511b919a410c0",
+  "deployed_at": "2026-08-23T19:30:17.185Z",
+  "contracts": [
+    {
+      "name": "TestUSD (prize token)",
+      "address": "0x2d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386",
+      "class_hash": "0x06ea4ae2d74521c0d8c3820376b61b22efb7838b9fbf2df0358f320692485d1e"
+    },
+    {
+      "name": "Arena",
+      "address": "0x17ea55ab3f9499550ba65aa34e2395180adca3b212a95cac81609a8002b577b",
+      "class_hash": "0x0520b886b83f71f2f34af0865aa766da8efd9ff63a824e553e36700037261b91"
+    },
+    {
+      "name": "ArenaAdapter",
+      "address": "0x1b9f5a5d28e18c39decc854664435aabe0ed02a03a948d0bc6cae171eebe991",
+      "class_hash": "0x046da51ea1b9b2b311156503dff3812d1fafd1a8cf1408f0a477197eb47f86b0"
+    }
+  ],
+  "privacy_pool": null,
+  "pool_note": "D014: self-declared pool deferred (sequencer surge economics); shielded legs remain Devnet-proven, UNVERIFIED-on-Sepolia",
+  "rules_commitment": "0x925e2f2fbcf6cffa09a0dbb45eb42f444b080cb98b8a28b473008eb5c21851",
+  "round_params": {
+    "startTime": "1787513578",
+    "endTime": "1787514478",
+    "startingUnits": "1000",
+    "maxAllocationBps": 3500,
+    "maxDrawdownBps": 2000,
+    "prizeCapUnits": "100",
+    "prizeDeposited": "100"
+  },
+  "strategies": [
+    {
+      "label": "Falcon",
+      "commitment": "0x46414c434f4e5f434f4d4d4954"
+    },
+    {
+      "label": "Tortoise",
+      "commitment": "0x544f52544f4953455f434f4d4d4954"
+    },
+    {
+      "label": "Pulse",
+      "commitment": "0x50554c53455f434f4d4d4954"
+    }
+  ],
+  "transactions": {
+    "setupMulticall": "0x3bcfc01af3c003f4d3d7aabdc99bac7f3c14dfa59875870b4acfaec546a25a4",
+    "settle": "0x6429d36bf07bdbe1ddf64a981b77a6d8eacaaa576851fa718cb4787a8de36ad",
+    "close_note": "first successful close in earlier attempt; settle tx authoritative"
+  },
+  "winner_commitment": "0x46414c434f4e5f434f4d4d4954"
+}

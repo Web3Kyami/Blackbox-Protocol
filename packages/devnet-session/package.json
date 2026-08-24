@@ -1,0 +1,22 @@
+{
+  "name": "@blackbox-arena/devnet-session",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Blackbox Arena Devnet Session Service, Sequential Deployment, and Verification Suite",
+  "scripts": {
+    "test": "vitest run test/",
+    "test:stage-a": "vitest run test/stage-a-session.test.ts",
+    "test:stage-b": "vitest run test/stage-b-dashboard.test.ts",
+    "test:e2e": "vitest run test/blackbox-arena.test.ts"
+  },
+  "dependencies": {
+    "starknet": "10.0.0-beta.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

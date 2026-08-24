@@ -1,0 +1,25 @@
+{
+  "name": "blackbox-arena",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "dev": "node scripts/serve-web.mjs",
+    "dev:web": "node scripts/serve-web.mjs",
+    "format:check": "node scripts/format-check.mjs",
+    "lint": "node --check packages/core/src/arena.mjs && node --check fixtures/strategies/case-study.mjs && node --check apps/web/src/dashboard-model.mjs && node --check apps/web/src/app.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node --test packages/core/test/*.test.mjs tests/*.test.mjs",
+    "test:core": "node --test packages/core/test/*.test.mjs",
+    "test:integration": "node --test tests/*.test.mjs",
+    "secret:scan": "node scripts/secret-scan.mjs",
+    "devnet:session": "node scripts/devnet-session.mjs",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run secret:scan",
+    "devnet:doctor": "node scripts/devnet-doctor.mjs",
+    "verify:devnet": "node scripts/verify-devnet.mjs"
+  }
+}

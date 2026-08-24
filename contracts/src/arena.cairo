@@ -1,0 +1,608 @@
+use starknet::ContractAddress;
+
+#[starknet::interface]
+pub trait IPrizeToken<TState> {
+    fn balance_of(self: @TState, account: ContractAddress) -> u256;
+    fn transfer(ref self: TState, recipient: ContractAddress, amount: u256) -> bool;
+    fn transfer_from(
+        ref self: TState,
+        sender: ContractAddress,
+        recipient: ContractAddress,
+        amount: u256,
+    ) -> bool;
+}
+
+pub mod reason {
+    pub const ACCEPTED: felt252 = 'ACCEPTED';
+    pub const NOT_STARTED: felt252 = 'NOT_STARTED';
+    pub const CLOSED: felt252 = 'CLOSED';
+    pub const UNREGISTERED: felt252 = 'UNREGISTERED';
+    pub const DUPLICATE: felt252 = 'DUPLICATE';
+    pub const BAD_ASSET: felt252 = 'BAD_ASSET';
+    pub const BAD_TARGET: felt252 = 'BAD_TARGET';
+    pub const ALLOCATION: felt252 = 'ALLOCATION';
+    pub const BAD_VALUE: felt252 = 'BAD_VALUE';
+    pub const STALE_PRICE: felt252 = 'STALE_PRICE';
+}
+
+#[derive(Copy, Drop, Serde, starknet::Store)]
+pub struct StrategyState {
+    pub registered: bool,
+    pub current_value: u128,
+    pub max_drawdown_bps: u16,
+    pub registration_order: u32,
+    pub accepted_actions: u32,
+    pub rejected_actions: u32,
+    pub registrant: ContractAddress,
+}
+
+#[derive(Copy, Drop, Serde)]
+pub struct ScoreEntry {
+    pub commitment: felt252,
+    pub final_value: u128,
+    pub return_bps: i64,
+    pub max_drawdown_bps: u16,
+    pub eligible: bool,
+    pub score_bps: i64,
+    pub registration_order: u32,
+}
+
+#[starknet::interface]
+pub trait IArena<TState> {
+    fn set_action_adapter(ref self: TState, action_adapter: ContractAddress);
+    fn get_action_adapter(self: @TState) -> ContractAddress;
+    fn add_allowed_asset(ref self: TState, asset: ContractAddress);
+    fn add_allowed_target(ref self: TState, target: ContractAddress);
+    fn is_asset_allowed(self: @TState, asset: ContractAddress) -> bool;
+    fn is_target_allowed(self: @TState, target: ContractAddress) -> bool;
+    fn set_price(ref self: TState, asset: ContractAddress, price: u128);
+    fn get_price(self: @TState, asset: ContractAddress) -> u128;
+    fn get_price_timestamp(self: @TState, asset: ContractAddress) -> u64;
+    fn register_strategy(ref self: TState, commitment: felt252);
+    fn get_registrant(self: @TState, commitment: felt252) -> ContractAddress;
+    fn submit_action(
+        ref self: TState,
+        receipt_id: felt252,
+        strategy_commitment: felt252,
+        asset: ContractAddress,
+        target: ContractAddress,
+        allocation_units: u128,
+        portfolio_value_before: u128,
+        portfolio_value_after: u128,
+        drawdown_bps: u16,
+    ) -> felt252;
+    fn open_submit_action(
+        ref self: TState,
+        receipt_id: felt252,
+        strategy_commitment: felt252,
+        asset: ContractAddress,
+        target: ContractAddress,
+        allocation_units: u128,
+        portfolio_value_before: u128,
+        portfolio_value_after: u128,
+        drawdown_bps: u16,
+    ) -> felt252;
+    fn close(ref self: TState);
+    fn deposit_prize(ref self: TState, amount_units: u128);
+    fn get_prize_token(self: @TState) -> ContractAddress;
+    fn get_prize_deposited(self: @TState) -> u128;
+    fn settle(ref self: TState, amount_units: u128) -> felt252;
+    fn get_settlement(self: @TState) -> (felt252, u128);
+    fn get_score(self: @TState, commitment: felt252) -> ScoreEntry;
+    fn get_action_counts(self: @TState, commitment: felt252) -> (u32, u32);
+    fn get_winner(self: @TState) -> felt252;
+    fn rules_commitment(self: @TState) -> felt252;
+}
+
+#[starknet::contract]
+pub mod Arena {
+    use core::num::traits::Zero;
+    use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess, StoragePointerWriteAccess};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use super::{IArena, IPrizeTokenDispatcher, IPrizeTokenDispatcherTrait, ScoreEntry, StrategyState, reason};
+
+    pub mod errors {
+        pub const ONLY_SPONSOR: felt252 = 'ONLY_SPONSOR';
+        pub const ONLY_ADAPTER: felt252 = 'ONLY_ADAPTER';
+        pub const BAD_TIME: felt252 = 'BAD_TIME';
+        pub const BAD_RULES: felt252 = 'BAD_RULES';
+        pub const BAD_ADAPTER: felt252 = 'BAD_ADAPTER';
+        pub const ADAPTER_ALREADY_SET: felt252 = 'ADAPTER_SET';
+        pub const REGISTRATION_CLOSED: felt252 = 'REG_CLOSED';
+        pub const DUPLICATE_STRATEGY: felt252 = 'DUP_STRATEGY';
+        pub const NOT_CLOSED: felt252 = 'NOT_CLOSED';
+        pub const ALREADY_CLOSED: felt252 = 'ALREADY_CLOSED';
+        pub const NO_WINNER: felt252 = 'NO_WINNER';
+        pub const ALREADY_SETTLED: felt252 = 'ALREADY_SETTLED';
+        pub const PRIZE_CAP: felt252 = 'PRIZE_CAP';
+        pub const INSUFFICIENT_PRIZE: felt252 = 'NO_PRIZE';
+        pub const PRIZE_NO_REGISTRANT: felt252 = 'NO_REGISTRANT';
+        pub const PRIZE_TRANSFER_FAILED: felt252 = 'PRIZE_XFER';
+        pub const DUPLICATE_ASSET: felt252 = 'DUP_ASSET';
+        pub const DUPLICATE_TARGET: felt252 = 'DUP_TARGET';
+        pub const BAD_ASSET: felt252 = 'BAD_ASSET';
+        pub const UNREGISTERED: felt252 = 'UNREGISTERED';
+        pub const ONLY_REGISTRANT: felt252 = 'ONLY_REGISTRANT';
+        pub const DUPLICATE: felt252 = 'DUPLICATE';
+        pub const BAD_TARGET: felt252 = 'BAD_TARGET';
+        pub const STALE_PRICE: felt252 = 'STALE_PRICE';
+        pub const BAD_VALUE: felt252 = 'BAD_VALUE';
+        pub const ALLOCATION_EXCEEDED: felt252 = 'ALLOC_EXCEED';
+    }
+
+    #[storage]
+    struct Storage {
+        sponsor: ContractAddress,
+        action_adapter: ContractAddress,
+        start_time: u64,
+        end_time: u64,
+        starting_units: u128,
+        max_allocation_bps: u16,
+        max_drawdown_bps: u16,
+        prize_cap_units: u128,
+        allowed_assets: Map<ContractAddress, bool>,
+        allowed_targets: Map<ContractAddress, bool>,
+        latest_price: Map<ContractAddress, u128>,
+        price_timestamp: Map<ContractAddress, u64>,
+        asset_count: u32,
+        target_count: u32,
+        rules_hash: felt252,
+        closed: bool,
+        settled: bool,
+        settlement_winner: felt252,
+        settlement_amount: u128,
+        prize_token: ContractAddress,
+        prize_deposited: u128,
+        registration_count: u32,
+        commitments: Map<u32, felt252>,
+        strategies: Map<felt252, StrategyState>,
+        receipts: Map<felt252, bool>,
+    }
+
+    #[event]
+    #[derive(Drop, starknet::Event)]
+    enum Event {
+        StrategyRegistered: StrategyRegistered,
+        ActionSubmitted: ActionSubmitted,
+        ActionReceipt: ActionReceipt,
+        ArenaClosed: ArenaClosed,
+        ActionAdapterSet: ActionAdapterSet,
+        AssetAdded: AssetAdded,
+        TargetAdded: TargetAdded,
+        PriceSet: PriceSet,
+        PrizeDeposited: PrizeDeposited,
+        PrizePaid: PrizePaid,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct StrategyRegistered {
+        #[key]
+        commitment: felt252,
+        registration_order: u32,
+        registrant: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ActionReceipt {
+        #[key]
+        receipt_id: felt252,
+        #[key]
+        strategy_commitment: felt252,
+        reason_code: felt252,
+        accepted: bool,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ActionSubmitted {
+        #[key]
+        receipt_id: felt252,
+        #[key]
+        strategy_commitment: felt252,
+        accepted: bool,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ArenaClosed {
+        winner_commitment: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ActionAdapterSet {
+        #[key]
+        action_adapter: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct AssetAdded {
+        #[key]
+        asset: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct TargetAdded {
+        #[key]
+        target: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct PriceSet {
+        #[key]
+        asset: ContractAddress,
+        price: u128,
+        timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct PrizeDeposited {
+        #[key]
+        from: ContractAddress,
+        amount: u128,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct PrizePaid {
+        #[key]
+        winner_commitment: felt252,
+        recipient: ContractAddress,
+        amount: u128,
+    }
+
+    #[constructor]
+    fn constructor(
+        ref self: ContractState,
+        sponsor: ContractAddress,
+        start_time: u64,
+        end_time: u64,
+        starting_units: u128,
+        max_allocation_bps: u16,
+        max_drawdown_bps: u16,
+        prize_cap_units: u128,
+        prize_token: ContractAddress,
+        initial_assets: Span<ContractAddress>,
+        initial_targets: Span<ContractAddress>,
+        rules_commitment: felt252,
+    ) {
+        assert(start_time < end_time, errors::BAD_TIME);
+        assert(starting_units.is_non_zero(), errors::BAD_RULES);
+        assert(max_allocation_bps.is_non_zero() && max_allocation_bps <= 10000, errors::BAD_RULES);
+        assert(max_drawdown_bps <= 10000, errors::BAD_RULES);
+        assert(prize_token.is_non_zero(), errors::BAD_RULES);
+        self.sponsor.write(sponsor);
+        self.action_adapter.write(Zero::zero());
+        self.start_time.write(start_time);
+        self.end_time.write(end_time);
+        self.starting_units.write(starting_units);
+        self.max_allocation_bps.write(max_allocation_bps);
+        self.max_drawdown_bps.write(max_drawdown_bps);
+        self.prize_cap_units.write(prize_cap_units);
+        self.prize_token.write(prize_token);
+        let mut assets = initial_assets;
+        let mut i: usize = 0;
+        while i < assets.len() {
+            let asset: ContractAddress = *assets[i];
+            self.allowed_assets.write(asset, true);
+            self.asset_count.write(self.asset_count.read() + 1);
+            i += 1;
+        };
+        let mut targets = initial_targets;
+        let mut j: usize = 0;
+        while j < targets.len() {
+            let target: ContractAddress = *targets[j];
+            self.allowed_targets.write(target, true);
+            self.target_count.write(self.target_count.read() + 1);
+            j += 1;
+        };
+        self.rules_hash.write(rules_commitment);
+    }
+
+    #[abi(embed_v0)]
+    impl ArenaImpl of IArena<ContractState> {
+        fn set_action_adapter(ref self: ContractState, action_adapter: ContractAddress) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(action_adapter.is_non_zero(), errors::BAD_ADAPTER);
+            assert(self.action_adapter.read().is_zero(), errors::ADAPTER_ALREADY_SET);
+            assert(get_block_timestamp() < self.start_time.read(), errors::BAD_TIME);
+            assert(self.registration_count.read() == 0, errors::REGISTRATION_CLOSED);
+            self.action_adapter.write(action_adapter);
+            self.emit(ActionAdapterSet { action_adapter });
+        }
+
+        fn add_allowed_asset(ref self: ContractState, asset: ContractAddress) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(!self.allowed_assets.read(asset), errors::DUPLICATE_ASSET);
+            self.allowed_assets.write(asset, true);
+            self.asset_count.write(self.asset_count.read() + 1);
+            self.emit(AssetAdded { asset });
+        }
+
+        fn add_allowed_target(ref self: ContractState, target: ContractAddress) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(!self.allowed_targets.read(target), errors::DUPLICATE_TARGET);
+            self.allowed_targets.write(target, true);
+            self.target_count.write(self.target_count.read() + 1);
+            self.emit(TargetAdded { target });
+        }
+
+        fn is_asset_allowed(self: @ContractState, asset: ContractAddress) -> bool {
+            self.allowed_assets.read(asset)
+        }
+
+        fn is_target_allowed(self: @ContractState, target: ContractAddress) -> bool {
+            self.allowed_targets.read(target)
+        }
+
+        fn set_price(ref self: ContractState, asset: ContractAddress, price: u128) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(self.allowed_assets.read(asset), errors::BAD_ASSET);
+            assert(price.is_non_zero(), errors::BAD_RULES);
+            assert(get_block_timestamp() < self.start_time.read(), errors::BAD_TIME);
+            self.latest_price.write(asset, price);
+            self.price_timestamp.write(asset, get_block_timestamp());
+            self.emit(PriceSet { asset, price, timestamp: get_block_timestamp() });
+        }
+
+        fn get_price(self: @ContractState, asset: ContractAddress) -> u128 {
+            self.latest_price.read(asset)
+        }
+
+        fn get_price_timestamp(self: @ContractState, asset: ContractAddress) -> u64 {
+            self.price_timestamp.read(asset)
+        }
+
+        fn get_action_adapter(self: @ContractState) -> ContractAddress {
+            self.action_adapter.read()
+        }
+
+        fn register_strategy(ref self: ContractState, commitment: felt252) {
+            assert(get_block_timestamp() < self.start_time.read(), errors::REGISTRATION_CLOSED);
+            let existing = self.strategies.read(commitment);
+            assert(!existing.registered, errors::DUPLICATE_STRATEGY);
+            let order = self.registration_count.read() + 1;
+            self.registration_count.write(order);
+            self.commitments.write(order, commitment);
+            let registrant = get_caller_address();
+            self.strategies.write(
+                commitment,
+                StrategyState {
+                    registered: true,
+                    current_value: self.starting_units.read(),
+                    max_drawdown_bps: 0,
+                    registration_order: order,
+                    accepted_actions: 0,
+                    rejected_actions: 0,
+                    registrant,
+                },
+            );
+            self.emit(StrategyRegistered { commitment, registration_order: order, registrant });
+        }
+
+        fn get_registrant(self: @ContractState, commitment: felt252) -> ContractAddress {
+            self.strategies.read(commitment).registrant
+        }
+
+        fn submit_action(
+            ref self: ContractState,
+            receipt_id: felt252,
+            strategy_commitment: felt252,
+            asset: ContractAddress,
+            target: ContractAddress,
+            allocation_units: u128,
+            portfolio_value_before: u128,
+            portfolio_value_after: u128,
+            drawdown_bps: u16,
+        ) -> felt252 {
+            let adapter = self.action_adapter.read();
+            assert(adapter.is_non_zero() && get_caller_address() == adapter, errors::ONLY_ADAPTER);
+            let mut strategy = self.strategies.read(strategy_commitment);
+            let now = get_block_timestamp();
+            let result = if !strategy.registered {
+                reason::UNREGISTERED
+            } else if now < self.start_time.read() {
+                reason::NOT_STARTED
+            } else if now > self.end_time.read() || self.closed.read() {
+                reason::CLOSED
+            } else if self.receipts.read(receipt_id) {
+                reason::DUPLICATE
+            } else if !self.allowed_assets.read(asset) {
+                reason::BAD_ASSET
+            } else if !self.allowed_targets.read(target) {
+                reason::BAD_TARGET
+            } else if self.price_timestamp.read(asset) == 0 {
+                reason::STALE_PRICE
+            } else if portfolio_value_before != strategy.current_value || drawdown_bps > 10000 {
+                reason::BAD_VALUE
+            } else if allocation_units * 10000 > portfolio_value_before * self.max_allocation_bps.read().into() {
+                reason::ALLOCATION
+            } else {
+                reason::ACCEPTED
+            };
+
+            if result != reason::DUPLICATE {
+                self.receipts.write(receipt_id, true);
+            }
+            if strategy.registered {
+                if result == reason::ACCEPTED {
+                    strategy.current_value = portfolio_value_after;
+                    if drawdown_bps > strategy.max_drawdown_bps {
+                        strategy.max_drawdown_bps = drawdown_bps;
+                    }
+                    strategy.accepted_actions += 1;
+                } else {
+                    strategy.rejected_actions += 1;
+                }
+                self.strategies.write(strategy_commitment, strategy);
+            }
+            self.emit(ActionReceipt {
+                receipt_id,
+                strategy_commitment,
+                reason_code: result,
+                accepted: result == reason::ACCEPTED,
+            });
+            result
+        }
+
+        fn close(ref self: ContractState) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(get_block_timestamp() >= self.end_time.read(), errors::BAD_TIME);
+            assert(!self.closed.read(), errors::ALREADY_CLOSED);
+            self.closed.write(true);
+            let winner = self.get_winner();
+            self.emit(ArenaClosed { winner_commitment: winner });
+        }
+        fn open_submit_action(
+            ref self: ContractState,
+            receipt_id: felt252,
+            strategy_commitment: felt252,
+            asset: ContractAddress,
+            target: ContractAddress,
+            allocation_units: u128,
+            portfolio_value_before: u128,
+            portfolio_value_after: u128,
+            drawdown_bps: u16,
+        ) -> felt252 {
+            let caller = get_caller_address();
+            let strategy = self.strategies.read(strategy_commitment);
+            assert(strategy.registered, errors::UNREGISTERED);
+            assert(caller == strategy.registrant, errors::ONLY_REGISTRANT);
+            let now = get_block_timestamp();
+            assert(now >= self.start_time.read() && now <= self.end_time.read() && !self.closed.read(), errors::BAD_TIME);
+            assert(!self.receipts.read(receipt_id), errors::DUPLICATE);
+            assert(self.allowed_assets.read(asset), errors::BAD_ASSET);
+            assert(self.allowed_targets.read(target), errors::BAD_TARGET);
+            assert(self.price_timestamp.read(asset) != 0, errors::STALE_PRICE);
+            assert(portfolio_value_before == strategy.current_value, errors::BAD_VALUE);
+            assert(allocation_units * 10000 <= portfolio_value_before * self.max_allocation_bps.read().into(), errors::ALLOCATION_EXCEEDED);
+
+            let accepted = allocation_units <= portfolio_value_before;
+            let mut new_value = strategy.current_value;
+            let mut dd = strategy.max_drawdown_bps;
+            if accepted {
+                new_value = portfolio_value_after;
+                if drawdown_bps > dd { dd = drawdown_bps; };
+                self.receipts.write(receipt_id, true);
+                let mut s = self.strategies.read(strategy_commitment);
+                s.current_value = new_value;
+                s.max_drawdown_bps = dd;
+                s.accepted_actions += 1;
+                self.strategies.write(strategy_commitment, s);
+            } else {
+                let mut s = self.strategies.read(strategy_commitment);
+                s.rejected_actions += 1;
+                self.strategies.write(strategy_commitment, s);
+            }
+            self.emit(ActionSubmitted { receipt_id, strategy_commitment, accepted });
+            if accepted { 'ACCEPTED' } else { 'REJECTED' }
+        }
+
+
+        fn deposit_prize(ref self: ContractState, amount_units: u128) {
+            let caller = get_caller_address();
+            assert(caller == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(amount_units.is_non_zero(), errors::BAD_RULES);
+            let token = IPrizeTokenDispatcher { contract_address: self.prize_token.read() };
+            let transferred =
+                token.transfer_from(caller, get_contract_address(), amount_units.into());
+            assert(transferred, errors::PRIZE_TRANSFER_FAILED);
+            self.prize_deposited.write(self.prize_deposited.read() + amount_units);
+            self.emit(PrizeDeposited { from: caller, amount: amount_units });
+        }
+
+        fn get_prize_token(self: @ContractState) -> ContractAddress {
+            self.prize_token.read()
+        }
+
+        fn get_prize_deposited(self: @ContractState) -> u128 {
+            self.prize_deposited.read()
+        }
+
+        fn settle(ref self: ContractState, amount_units: u128) -> felt252 {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(self.closed.read(), errors::NOT_CLOSED);
+            assert(!self.settled.read(), errors::ALREADY_SETTLED);
+            assert(amount_units <= self.prize_cap_units.read(), errors::PRIZE_CAP);
+            let winner = self.get_winner();
+            let recipient = self.strategies.read(winner).registrant;
+            assert(recipient.is_non_zero(), errors::PRIZE_NO_REGISTRANT);
+            let token = IPrizeTokenDispatcher { contract_address: self.prize_token.read() };
+            let balance = token.balance_of(get_contract_address());
+            assert(balance >= amount_units.into(), errors::INSUFFICIENT_PRIZE);
+            let transferred = token.transfer(recipient, amount_units.into());
+            assert(transferred, errors::PRIZE_TRANSFER_FAILED);
+            self.settled.write(true);
+            self.settlement_winner.write(winner);
+            self.settlement_amount.write(amount_units);
+            self.emit(PrizePaid { winner_commitment: winner, recipient, amount: amount_units });
+            winner
+        }
+
+        fn get_settlement(self: @ContractState) -> (felt252, u128) {
+            (self.settlement_winner.read(), self.settlement_amount.read())
+        }
+
+        fn get_score(self: @ContractState, commitment: felt252) -> ScoreEntry {
+            let strategy = self.strategies.read(commitment);
+            let starting: i128 = self.starting_units.read().try_into().unwrap();
+            let final_value: i128 = strategy.current_value.try_into().unwrap();
+            let return_bps_i128 = ((final_value - starting) * 10000) / starting;
+            let return_bps: i64 = return_bps_i128.try_into().unwrap();
+            let eligible = strategy.registered && strategy.max_drawdown_bps <= self.max_drawdown_bps.read();
+            let score_bps = if eligible { return_bps - strategy.max_drawdown_bps.into() } else { 0 };
+            ScoreEntry {
+                commitment,
+                final_value: strategy.current_value,
+                return_bps,
+                max_drawdown_bps: strategy.max_drawdown_bps,
+                eligible,
+                score_bps,
+                registration_order: strategy.registration_order,
+            }
+        }
+
+        fn get_action_counts(self: @ContractState, commitment: felt252) -> (u32, u32) {
+            let strategy = self.strategies.read(commitment);
+            (strategy.accepted_actions, strategy.rejected_actions)
+        }
+
+        fn get_winner(self: @ContractState) -> felt252 {
+            assert(self.closed.read(), errors::NOT_CLOSED);
+            let mut found = false;
+            let mut winner: felt252 = 0;
+            let mut best = ScoreEntry {
+                commitment: 0,
+                final_value: 0,
+                return_bps: 0,
+                max_drawdown_bps: 0,
+                eligible: false,
+                score_bps: 0,
+                registration_order: 0,
+            };
+            let mut index: u32 = 1;
+            while index <= self.registration_count.read() {
+                let candidate_commitment = self.commitments.read(index);
+                let candidate = self.get_score(candidate_commitment);
+                let beats = candidate.eligible && (
+                    !found || candidate.score_bps > best.score_bps || (
+                        candidate.score_bps == best.score_bps && (
+                            candidate.max_drawdown_bps < best.max_drawdown_bps || (
+                                candidate.max_drawdown_bps == best.max_drawdown_bps
+                                    && candidate.registration_order < best.registration_order
+                            )
+                        )
+                    )
+                );
+                if beats {
+                    found = true;
+                    winner = candidate_commitment;
+                    best = candidate;
+                }
+                index += 1;
+            };
+            assert(found, errors::NO_WINNER);
+            winner
+        }
+
+        fn rules_commitment(self: @ContractState) -> felt252 {
+            self.rules_hash.read()
+        }
+    }
+}
