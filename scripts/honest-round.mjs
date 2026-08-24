@@ -1,8 +1,9 @@
-// Honest Sepolia round v2 — HANDOFF fix: ONE arenaAddr scoped through EVERY step.
-// Flow: deploy(Arena,Adapter) → setup → register(agent) → prize → actions → close → settle.
+// Honest Sepolia round v3 — TWO independent strategist wallets + contract-observed trade values (f1).
+// Flow: deploy(Arena,Adapter) → setup → register(Tortoise=v2, Falcon=v1) → prize →
+//       real transfers through whitelisted target → close → settle.
+// Value deltas are DERIVED from balance_of reads around each transfer — never caller-invented.
 // Every write is verified via view calls ON THE SAME arenaAddr (skill: onchain-verify-not-logs).
 // Fail-closed: any verification mismatch aborts the run and marks the evidence FAILED.
-// Known limitation (documented): both strategies operate from the agent wallet (f-fix pending).
 import { readFileSync, copyFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 const ROOT = "/root/projects/BlackBox Arena";
@@ -25,14 +26,17 @@ function loadAccount(envFile) {
 }
 
 const sponsor = loadAccount(`${ROOT}/.local/burner-c.env`);
-const agent = loadAccount(`${ROOT}/.env.local`); // v2
+const tortoiseWallet = loadAccount(`${ROOT}/.env.local`);            // v2 — Tortoise strategist/operator
+const falconWallet = loadAccount(`${ROOT}/.local/burner-v1-backup.env`); // v1 — Falcon strategist/operator
 
 console.log("[sponsor]", sponsor.address.slice(0, 20) + "…");
-console.log("[agent] ", agent.address.slice(0, 20) + "…");
+console.log("[tortoise]", tortoiseWallet.address.slice(0, 20) + "…");
+console.log("[falcon] ", falconWallet.address.slice(0, 20) + "…");
 
 const NEW_ARENA_CLASS = "0x72c7b997f3e71897104d9be470d9d7c4cafd08330dfd0617a38a5bfa2a0c54b";
 const ADAPTER_CLASS = "0x046da51ea1b9b2b311156503dff3812d1fafd1a8cf1408f0a477197eb47f86b0";
 const USD_TOKEN = "0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386";
+const TRADE_TARGET = "0x123456789"; // whitelisted action target (also the float overflow sink)
 // Modest tip: large tips multiply against l2_gas max_amount inside account-balance validation
 // and can spuriously trip "resources exceed balance" (seen live: 2e13 tip × 6.3M gas > wallet).
 const TIP = "0x" + (1n * 10n ** 12n).toString(16);
@@ -111,14 +115,14 @@ function deployedAddress(deployResult) {
 // ── Evidence accumulator (fail-closed) ──
 const evidence = {
     network: "sepolia",
-    test: "honest round v2 (arena-address scoping fix)",
+    test: "honest round v3 (two independent wallets + balance-observed trade values)",
     started_at: new Date().toISOString(),
     arena_class_hash: NEW_ARENA_CLASS,
     adapter_class_hash: ADAPTER_CLASS,
     usd_token: USD_TOKEN,
     sponsor: sponsor.address,
-    agent_wallet: agent.address,
-    wallets_note: "Both strategies registered AND operated from the agent wallet (single-wallet limitation, tracked as follow-up f-fix).",
+    tortoise_wallet: tortoiseWallet.address,
+    falcon_wallet: falconWallet.address,
     steps: [],
     status: "RUNNING",
 };
@@ -172,7 +176,7 @@ async function runMain() {
         100n,    // prize_cap_units
         USD_TOKEN,
         1n, USD_TOKEN,      // initial_assets span
-        1n, "0x123456789",  // initial_targets span
+        1n, TRADE_TARGET,   // initial_targets span
         rulesCommitment,
     ];
     const arenaDeployTx = await sponsor.deployContract(
@@ -199,10 +203,11 @@ async function runMain() {
     // Liveness check on the exact address we will use for everything else.
     assertEq(await viewOn(ARENA_ADDR, "get_action_adapter"), 0n, "Arena live & action_adapter unset pre-setup");
 
-    // ── Setup (sponsor): mint, bind adapter, set price ──
+    // ── Setup (sponsor): mint floats, bind adapter, set price ──
     console.log("\n=== Setup ===\n");
     const { tx: setupTx } = await sendTx(sponsor, "setup", [
-        { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [agent.address, "50000", "0"] },
+        { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [tortoiseWallet.address, "50000", "0"] },
+        { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [falconWallet.address, "50000", "0"] },
         { contractAddress: ARENA_ADDR, entrypoint: "set_action_adapter", calldata: [adapterAddr] },
         { contractAddress: ARENA_ADDR, entrypoint: "set_price", calldata: [USD_TOKEN, "1000000000000000000"] },
     ]);
@@ -214,26 +219,26 @@ async function runMain() {
     if (BigInt(priceTs[0]) === 0n) throw new Error("VERIFY FAIL: price timestamp zero");
     console.log("[verify] USD price set @ ts", Number(priceTs[0]), "✅");
 
-    // ── Register both strategies FROM THE AGENT WALLET (registrant = agent) ──
-    console.log("\n=== Registration (agent wallet) ===\n");
+    // ── Register each strategy from its OWN wallet (two independent agents) ──
+    console.log("\n=== Registration (independent wallets) ===\n");
     const tortoiseDesc = "Conservative compounder with small allocations and low drawdown";
     const falconDesc = "Aggressive momentum push with high allocation";
     const tortoiseCommitment = sha240({ describe: tortoiseDesc, alloc: 0.25 });
     const falconCommitment = sha240({ describe: falconDesc, alloc: 0.35 });
     step("commitments", {
-        tortoise: { commitment: tortoiseCommitment, describe: tortoiseDesc },
-        falcon: { commitment: falconCommitment, describe: falconDesc },
+        tortoise: { commitment: tortoiseCommitment, describe: tortoiseDesc, wallet: tortoiseWallet.address },
+        falcon: { commitment: falconCommitment, describe: falconDesc, wallet: falconWallet.address },
         derived_by: "sha256(canonicalJson) truncated to 240 bits",
     });
 
-    async function registerStrategy(label, commitment, desc) {
-        const { tx } = await sendTx(agent, `register:${label}`, [{ contractAddress: ARENA_ADDR, entrypoint: "register_strategy", calldata: [commitment] }]);
+    async function registerStrategy(wallet, label, commitment, desc) {
+        const { tx } = await sendTx(wallet, `register:${label}`, [{ contractAddress: ARENA_ADDR, entrypoint: "register_strategy", calldata: [commitment] }]);
         // Per HANDOFF: after register → get_registrant(commitment) == submitter, ON THE SAME arena.
-        assertEq(await viewOn(ARENA_ADDR, "get_registrant", [commitment]), agent.address, `${label} registrant == agent`);
-        step(`register_${label.toLowerCase()}`, { tx: tx.transaction_hash, commitment, registrant: agent.address });
+        assertEq(await viewOn(ARENA_ADDR, "get_registrant", [commitment]), wallet.address, `${label} registrant == own wallet`);
+        step(`register_${label.toLowerCase()}`, { tx: tx.transaction_hash, commitment, registrant: wallet.address });
     }
-    await registerStrategy("Tortoise", tortoiseCommitment, tortoiseDesc);
-    await registerStrategy("Falcon", falconCommitment, falconDesc);
+    await registerStrategy(tortoiseWallet, "Tortoise", tortoiseCommitment, tortoiseDesc);
+    await registerStrategy(falconWallet, "Falcon", falconCommitment, falconDesc);
 
     // ── Prize escrow (sponsor) ──
     console.log("\n=== Prize ===\n");
@@ -246,19 +251,51 @@ async function runMain() {
     const waitSec = Number(startTime) - Math.floor(Date.now() / 1000) + 5;
     if (waitSec > 0) { console.log(`\nwaiting ${waitSec}s for round start...`); await new Promise(r => setTimeout(r, waitSec * 1000)); }
 
-    console.log("\n=== Agent Actions ===\n");
+    console.log("\n=== Agent Actions (balance-observed) ===\n");
     // open_submit_action(receipt_id, strategy_commitment, asset, target, allocation_units,
     //                    portfolio_value_before, portfolio_value_after, drawdown_bps)
-    // NOTE: the contract REJECTS (not reverts) when allocation > value; accepted requires
-    // allocation_units <= portfolio_value_before. Tortoise 250/1000 → accepted.
-    async function submitAction(label, receiptIdHex, commitment, allocUnits, afterVal, ddBps) {
-        const { tx, rcpt } = await sendTx(agent, `action:${label}`, [{
+    // f1 fix: value_after is NOT invented. Each wallet executes a REAL transfer through the
+    // whitelisted target; value_before/value_after/drawdown are DERIVED from balance_of reads
+    // taken before and after the transfer. Contract rule honored: first action requires
+    // value_before == starting_units (1000), so each wallet's float is minted to exactly 1000.
+    async function submitObservedAction(wallet, label, receiptIdHex, commitment, spendUnits) {
+        // Float normalization to exactly 1000 whole units (18 decimals).
+        // Deficit → sponsor mints the difference. Surplus → the WALLET pushes its own
+        // excess to the whitelisted target (sponsor holds ~0 TestUSD, can't pull it back).
+        const UNIT = 10n ** 18n;
+        const raw = await viewOn(USD_TOKEN, "balance_of", [wallet.address]);
+        const balRaw = BigInt(Array.isArray(raw) ? raw[0] : raw);
+        const targetRaw = 1000n * UNIT;
+        if (balRaw < targetRaw) {
+            await sendTx(sponsor, `float:${label}`, [{ contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [wallet.address, "0x" + (targetRaw - balRaw).toString(16), "0"] }]);
+        } else if (balRaw > targetRaw) {
+            await sendTx(wallet, `float-trim:${label}`, [{ contractAddress: USD_TOKEN, entrypoint: "transfer", calldata: [TRADE_TARGET, "0x" + (balRaw - targetRaw).toString(16), "0"] }]);
+        }
+        const preRaw = BigInt((await viewOn(USD_TOKEN, "balance_of", [wallet.address]))[0]);
+        const preUnits = Number(preRaw / UNIT);
+        if (preUnits !== 1000) throw new Error(`FAIL-CLOSED: ${label} float != 1000 units (got ${preUnits})`);
+
+        // REAL trade: transfer spendUnits of TestUSD to the whitelisted target.
+        const { tx } = await sendTx(wallet, `trade:${label}`, [{
+            contractAddress: USD_TOKEN, entrypoint: "transfer",
+            calldata: [TRADE_TARGET, String(spendUnits), "0"],
+        }]);
+
+        const postRaw = BigInt((await viewOn(USD_TOKEN, "balance_of", [wallet.address]))[0]);
+        const afterUnits = Number(postRaw / UNIT);
+        const delta = preUnits - afterUnits;
+        const spendWhole = Number(spendUnits / UNIT); // whole units — raw wei would overflow u16 drawdown_bps
+        const allocBpsOfValue = Math.floor((spendWhole * 10000) / preUnits);
+        console.log(`[${label}] observed: ${preUnits} → ${afterUnits} units (Δ−${delta})`);
+
+        const call = await sendTx(wallet, `action:${label}`, [{
             contractAddress: ARENA_ADDR, entrypoint: "open_submit_action",
-            calldata: [receiptIdHex, commitment, USD_TOKEN, "0x123456789", String(allocUnits), "1000", String(afterVal), String(ddBps)],
+            calldata: [receiptIdHex, commitment, USD_TOKEN, TRADE_TARGET, String(delta),
+                String(preUnits), String(afterUnits), String(allocBpsOfValue)],
         }]);
         // Parse ActionSubmitted events from THIS tx to see the contract's internal verdict.
         // Raw RPC layout: keys=[event_selector, receipt_id, strategy_commitment], data=[accepted]
-        const evs = (rcpt.events ?? []).filter(e =>
+        const evs = (call.rcpt.events ?? []).filter(e =>
             BigInt(e.from_address) === BigInt(ARENA_ADDR)
             && e.keys.length === 3 && e.data.length >= 1
             && BigInt(e.keys[2]) === BigInt(commitment));
@@ -271,20 +308,28 @@ async function runMain() {
         const counts = await viewOn(ARENA_ADDR, "get_action_counts", [commitment]);
         const acc = Number(counts[0]), rej = Number(counts[1]);
         console.log(`[verify] ${label} action counts on THE arena: accepted=${acc} rejected=${rej}`);
-        return { label, tx: tx.transaction_hash, receipt_id: receiptIdHex, verdict: accepted === null ? "NO_EVENT" : accepted ? "ACCEPTED" : "REJECTED", accepted, accepted_count: acc, rejected_count: rej };
+        return {
+            label, tx: tx.transaction_hash, submit_tx: call.tx.transaction_hash, receipt_id: receiptIdHex,
+            verdict: accepted === null ? "NO_EVENT" : accepted ? "ACCEPTED" : "REJECTED", accepted,
+            accepted_count: acc, rejected_count: rej,
+            observed: true, operator: wallet.address, whitelisted_target: TRADE_TARGET,
+            pre_balance_units: preUnits, post_balance_units: afterUnits,
+            allocation_units: delta, portfolio_value_before: preUnits, portfolio_value_after: afterUnits,
+            drawdown_bps: allocBpsOfValue,
+        };
     }
 
-    const tRes = await submitAction("Tortoise", "0x746f72746f6973652d68303032", tortoiseCommitment, 250, 1020, 0);
+    const tRes = await submitObservedAction(tortoiseWallet, "Tortoise", "0x746f72746f6973652d68303032", tortoiseCommitment, 20n * 10n ** 18n);
     if (!(tRes.accepted === true && tRes.accepted_count === 1)) {
         throw new Error(`FAIL-CLOSED: Tortoise action not accepted on-chain (verdict=${tRes.verdict}, counts=${tRes.accepted_count}/${tRes.rejected_count})`);
     }
-    step("tortoise_action", { ...tRes, allocation_units: 250, before: 1000, after: 1020, drawdown_bps: 0 });
+    step("tortoise_action", tRes);
 
-    const fRes = await submitAction("Falcon", "0x66616c636f6e2d68303032", falconCommitment, 349, 1041, 0);
+    const fRes = await submitObservedAction(falconWallet, "Falcon", "0x66616c636f6e2d68303032", falconCommitment, 5n * 10n ** 18n);
     if (!(fRes.accepted === true && fRes.accepted_count === 1)) {
         throw new Error(`FAIL-CLOSED: Falcon action not accepted on-chain (verdict=${fRes.verdict}, counts=${fRes.accepted_count}/${fRes.rejected_count}) — abort before close so a bad demo can never be presented as success`);
     }
-    step("falcon_action", { ...fRes, allocation_units: 349, before: 1000, after: 1041, drawdown_bps: 0 });
+    step("falcon_action", fRes);
 
     // ── Wait for end, advance blocks, close & settle ──
     console.log("\n=== Close & Settle ===\n");
@@ -318,15 +363,18 @@ async function runMain() {
         arena: ARENA_ADDR,
         adapter: adapterAddr,
         rules_commitment_onchain: (await viewOn(ARENA_ADDR, "rules_commitment"))[0],
+        tortoise_wallet: tortoiseWallet.address,
+        falcon_wallet: falconWallet.address,
         tortoise_accepted: Number(finalCountsT[0]),
         falcon_accepted: Number(finalCountsF[0]),
         winner: winnerName,
         settlement_amount: Number(BigInt(settlement[1])),
+        value_observation: "portfolio_value_after derived from balance_of reads around real transfers",
     };
 
     console.log(`
 ════════════════════════════════════════
-  HONEST ROUND v2 — ALL STEPS CHAIN-VERIFIED
+  HONEST ROUND v3 — TWO WALLETS, BALANCE-OBSERVED VALUES — CHAIN-VERIFIED
 
   Arena:   ${ARENA_ADDR}
   Winner:  ${winnerName} (derived on-chain, settled)

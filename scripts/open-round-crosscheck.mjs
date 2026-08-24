@@ -1,5 +1,7 @@
-// Independent cross-check: re-derive EVERY evidence-file claim from live chain state.
+// v3 cross-check: re-derive EVERY evidence-file claim from live chain state.
 // Reads nothing from run logs — only the evidence JSON (for addresses/hashes) + RPC.
+// v3 additions: registrant-per-wallet separation + balance-derived value recomputation
+// (replays the transfer tx to recompute pre/post balances independently).
 import { readFileSync } from "node:fs";
 const { RpcProvider, hash } = await import("/root/projects/BlackBox Arena/_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js");
 let K = "";
@@ -19,6 +21,14 @@ async function viewOn(addr, name, cd = []) {
     if (r.error) throw new Error(name + ": " + JSON.stringify(r.error).slice(0, 150));
     return r.result;
 }
+async function balanceAt(block, holder) {
+    const blockId = { block_number: Number(BigInt(block)) }; // accepts number or hex-string
+    const sel = BigInt("0x" + hash.starknetKeccak("balance_of").toString(16)) & MASK;
+    const body = { jsonrpc: "2.0", id: 1, method: "starknet_call", params: [{ contract_address: ev.usd_token, entry_point_selector: "0x" + sel.toString(16), calldata: ["0x" + BigInt(holder).toString(16)] }, blockId] };
+    const r = await fetch(RPC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    if (r.error) throw new Error("balance_at_block: " + JSON.stringify(r.error).slice(0, 150));
+    return BigInt(r.result[0]);
+}
 let fails = 0;
 function check(label, ok, detail = "") {
     console.log(`${ok ? "✅" : "❌"} ${label}${detail ? " — " + detail : ""}`);
@@ -29,7 +39,8 @@ const stepOf = (n) => ev.steps.find(s => s.step === n) ?? {};
 const arena = ev.final_state.arena;
 const tC = stepOf("commitments").tortoise.commitment;
 const fC = stepOf("commitments").falcon.commitment;
-const agent = ev.agent_wallet;
+const tW = ev.tortoise_wallet, fW = ev.falcon_wallet;
+check("two DIFFERENT strategist wallets in evidence", tW && fW && BigInt(tW) !== BigInt(fW));
 
 // 1) Arena liveness + class binding (getClassAt returns the compiled class: abi + entry points)
 const cls = await provider.getClassAt(arena);
@@ -40,11 +51,9 @@ check("arena has code (getClassAt)", Array.isArray(cls.abi) && cls.abi.length > 
 const rules = (await viewOn(arena, "rules_commitment"))[0];
 check("rules_commitment matches evidence", BigInt(rules) === BigInt(stepOf("timing").rules_commitment));
 
-// 3) Registrants bound to AGENT wallet
-const regT = (await viewOn(arena, "get_registrant", [tC]))[0];
-const regF = (await viewOn(arena, "get_registrant", [fC]))[0];
-check("Tortoise registrant == agent wallet", BigInt(regT) === BigInt(agent));
-check("Falcon registrant == agent wallet", BigInt(regF) === BigInt(agent));
+// 3) Registrants bound to their OWN wallets (two independent agents)
+check("Tortoise registrant == tortoise wallet", BigInt((await viewOn(arena, "get_registrant", [tC]))[0]) === BigInt(tW));
+check("Falcon registrant == falcon wallet (DIFFERENT)", BigInt((await viewOn(arena, "get_registrant", [fC]))[0]) === BigInt(fW));
 
 // 4) Action counts ≥1 accepted / 0 rejected for BOTH strategies
 const cT = await viewOn(arena, "get_action_counts", [tC]);
@@ -52,21 +61,52 @@ const cF = await viewOn(arena, "get_action_counts", [fC]);
 check("Tortoise counts 1 accepted / 0 rejected", Number(cT[0]) >= 1 && Number(cT[1]) === 0, `${cT[0]}/${cT[1]}`);
 check("Falcon counts 1 accepted / 0 rejected", Number(cF[0]) >= 1 && Number(cF[1]) === 0, `${cF[0]}/${cF[1]}`);
 
-// 5) Settlement: on-chain winner & amount match evidence final_state
+// 5) Settlement + INDEPENDENT winner recomputation from observed values
 const sett = await viewOn(arena, "get_settlement");
-check("settled winner commitment == FALCON commitment", BigInt(sett[0]) === BigInt(fC));
+const fAct = stepOf("falcon_action"), tAct = stepOf("tortoise_action");
+function scoreOf(act) {
+    const before = Number(act.portfolio_value_before), after = Number(act.portfolio_value_after);
+    const retBps = Math.trunc(((after - before) * 10000) / before); // i64 trunc-toward-zero
+    return { score: retBps - Number(act.drawdown_bps), eligible: Number(act.drawdown_bps) <= 2000 };
+}
+const sT = scoreOf(tAct), sF = scoreOf(fAct);
+const bestC = sT.score > sF.score ? tC : fC;
+check("settled winner == strategy with higher RECOMPUTED score", BigInt(sett[0]) === BigInt(bestC),
+    `tortoise ${sT.score} vs falcon ${sF.score}`);
 check("settled amount == 100", Number(BigInt(sett[1])) === 100);
 check("prize_deposited == 100", Number(BigInt((await viewOn(arena, "get_prize_deposited"))[0])) === 100);
 
 // 6) Escrow emptied: arena holds ~0 prize token after payout
-const USD = ev.usd_token;
-const arenaBal = await viewOn(USD, "balance_of", [arena]);
+const arenaBal = await viewOn(ev.usd_token, "balance_of", [arena]);
 check("arena prize-token balance drained (< 1 unit)", BigInt(arenaBal[0]) < 10n ** 18n, String(arenaBal[0]));
 
 // 7) Winner derivation still reproducible post-close
-check("get_winner == FALCOM commitment", BigInt((await viewOn(arena, "get_winner"))[0]) === BigInt(fC));
+check("get_winner == get_settlement winner", BigInt((await viewOn(arena, "get_winner"))[0]) === BigInt(sett[0]));
 
-// 8) Every recorded tx hash: exists, SUCCEEDED, and action txs emitted ACCEPTED events FROM THE ARENA
+// 8) Balance-derived value observation: replay each trade tx and recompute the delta INDEPENDENTLY
+async function blockNumberOf(rcpt) {
+    if (rcpt.block_number != null) return Number(BigInt(rcpt.block_number));
+    return Number(BigInt((await provider.getBlock(rcpt.block_hash)).block_number));
+}
+for (const act of [tAct, fAct]) {
+    const rcpt = await provider.getTransactionReceipt(act.tx);
+    const n = await blockNumberOf(rcpt);
+    const w = act.operator;
+    const post = await balanceAt(n, w);       // state after this tx
+    const pre = await balanceAt(n - 1, w);    // state before this tx
+    if (!(n > 0)) throw new Error("trade tx at genesis?!");
+    const derivedAfter = Number(pre / 10n ** 18n);
+    const derivedDelta = derivedAfter - Number(post / 10n ** 18n);
+    check(`${act.label} value_before == chain-replayed pre-balance`, derivedAfter === Number(act.portfolio_value_before), `${derivedAfter} vs claimed ${act.portfolio_value_before}`);
+    check(`${act.label} value_after == chain-replayed post-balance`, Number(post / 10n ** 18n) === Number(act.portfolio_value_after), `${Number(post / 10n ** 18n)} vs claimed ${act.portfolio_value_after}`);
+    check(`${act.label} allocation_units == observed delta`, derivedDelta === Number(act.allocation_units), `Δ${derivedDelta} vs claimed ${act.allocation_units}`);
+    // ERC-20 Transfer: keys=[selector, from, to], data=[value_lo, value_hi]
+    const xfer = rcpt.events?.find(e => BigInt(e.from_address) === BigInt(ev.usd_token) && e.keys.length >= 3);
+    check(`${act.label} transfer from strategist`, BigInt(xfer?.keys?.[1] ?? 0n) === BigInt(w));
+    check(`${act.label} transfer went to whitelisted target`, BigInt(xfer?.keys?.[2] ?? 0n) === 0x123456789n);
+}
+
+// 9) Every recorded tx hash exists and SUCCEEDED
 for (const s of ev.steps) {
     const hashes = Object.entries(s).filter(([k, v]) => k !== "step" && typeof v === "string" && /^0x[0-9a-f]{60,70}$/.test(v) && /tx|Tx/.test(k));
     for (const [k, h] of hashes) {
@@ -75,11 +115,12 @@ for (const s of ev.steps) {
         check(`tx ${s.step}.${k} succeeded`, okStatus, rcpt.execution_status);
     }
 }
-const tAct = stepOf("tortoise_action"), fAct = stepOf("falcon_action");
+
+// 10) Action submit txs emitted ACCEPTED ActionSubmitted events FROM THE ARENA
 for (const [act, cm] of [[tAct, tC], [fAct, fC]]) {
-    const rcpt = await provider.getTransactionReceipt(act.tx);
+    const rcpt = await provider.getTransactionReceipt(act.submit_tx ?? act.tx);
     const evs = (rcpt.events ?? []).filter(e => BigInt(e.from_address) === BigInt(arena) && e.keys.length === 3 && BigInt(e.keys[2]) === BigInt(cm));
-    check(`${act.label} tx emitted ActionSubmitted(accepted) from arena`, evs.length >= 1 && BigInt(evs[0].data[0]) === 1n);
+    check(`${act.label} submit emitted ActionSubmitted(accepted) from arena`, evs.length >= 1 && BigInt(evs[0].data[0]) === 1n);
 }
 
 console.log(fails === 0 ? "\n══ CROSS-CHECK PASSED — ALL CLAIMS RE-DERIVED FROM CHAIN ══" : `\n══ CROSS-CHECK FAILED: ${fails} mismatch(es) ══`);

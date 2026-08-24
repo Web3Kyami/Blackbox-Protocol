@@ -1,64 +1,45 @@
-# HANDOFF — Next Task: f1 — Verifiable trade through whitelisted target
+# HANDOFF — Next Task: f1 contract-side — Arena-observed value deltas
 
 ## Read first (in order)
 1. `AGENTS.md` (root) — engineering rules
-2. `docs/STATUS.md` — "Honest round v2" section is the current truth; round-1 section SUPERSEDED
-3. `docs/DECISIONS.md` — D001–D016 (esp. D014, D016)
-4. This file.
+2. `docs/STATUS.md` — "Honest round v3" section is the current state
+3. Skill `web3/blackbox-arena` + skill `onchain-verify-not-logs`
+4. `scripts/honest-round.mjs` (v3, working reference) + `scripts/open-round-crosscheck.mjs`
 
-## Context (one paragraph)
-Blackbox Arena = Starknet hackathon project where AI trading agents compete under pre-committed rules;
-deterministic on-chain scorer picks winner and pays prize automatically. The honest-demo fix (#2 from
-the Codex review) is DONE and chain-verified: `scripts/honest-round.mjs` runs a full round with one
-scoped `ARENA_ADDR`, agent-wallet registrations, both actions ACCEPTED, FALCON winning on score,
-settlement verified, and an independent 24-check cross-check (`scripts/open-round-crosscheck.mjs`)
-re-deriving every claim from chain state. Evidence: `.local/open-round-evidence.json` (status VERIFIED).
+## Context
+Round v3 is fully chain-verified: two independent strategist wallets, real
+transfers through the whitelisted target, values derived from balance reads,
+35-check independent crosscheck exit 0. The remaining trust hole is D012:
+the action's `portfolio_value_before/after` are still CALLER-SUPPLIED calldata.
+The script now reports them honestly, but the contract cannot enforce it.
 
-## EXACT next task: f1 — contract-observed trade (kill the self-report)
-The remaining credibility hole: `portfolio_value_after` and `drawdown_bps` are caller-supplied.
-Fix so at least ONE action's value delta comes from on-chain balances, not the submitter.
+## Task
+Make the Arena derive the value delta itself for actions whose asset/target are
+ERC-20-shaped. Design options (pick one, justify in STATUS):
+- **Option A (read via adapter):** adapter (already privileged) does
+  `IBalances.asset.balance_of(strategy_registrant)` before/after the routed call
+  and passes observed deltas to `submit_action`; Arena stores them.
+- **Option B (Arena reads):** Arena calls back into the token via
+  `starknet::call_contract` at settle/action time (library-call restrictions
+  apply; dispatcher pattern needed).
+- **Option C (event-based attestation):** require the tx that called
+  `open_submit_action` to contain an ERC-20 Transfer event to the whitelisted
+  target from the registrant, and parse amount from it (cheapest, no new trust).
 
-### Steps
-1. Pick a whitelisted target that holds the prize token (TestUSD already allowlisted as asset+target).
-   Sponsor funds a small float to the target or to the strategy-controlled path.
-2. Extend the action flow: before action → read `balance_of(strategy_escrow)` on the token contract;
-   execute a real `transfer`/swap through the whitelisted target; after action → read balance again.
-   Derive `portfolio_value_after = portfolio_value_before + (post − pre)` IN THE SCRIPT FROM READS,
-   and record both reads + tx hash in the evidence step.
-3. Contract side (optional but stronger): add a `submit_action_verified` variant that itself reads the
-   token balance via dispatcher and rejects if `after != before + observed_delta`. If you change Cairo:
-   scarb build, add Foundry tests, declare + redeploy (declare costs ~70 STRK — get Kyami approval),
-   update class hash in scripts.
-4. Rerun the honest round with the new flow; extend `open-round-crosscheck.mjs` to recompute the
-   balance delta independently from token contract reads.
-5. DoD: evidence file shows pre-balance, transfer tx, post-balance for at least one accepted action;
-   cross-check recomputes the delta from the token contract alone; `npm run verify` green.
-
-## Known gotchas (all hit live on Aug 24 — see skill starknet-sdk-pitfalls §11–§12)
-- SDK default padded resource_bounds + high tip trip OZ account validation ("exceed balance") even
-  with ample funds — ALWAYS pass tight manual bounds (raw named-params estimateFee ×1.15/×1.05, tip 1e12).
-  Pattern lives in `sendTx()` in `scripts/honest-round.mjs`.
-- Raw-RPC receipt events: `keys = [selector, ...keyed_fields]` — keyed fields start at index 1.
-- Commitments/rules hashes: truncated sha256 (`.slice(0,60)`); full digest overflows felt252.
-- Registrations must land BEFORE start_time; script uses +420s buffer — keep it.
-- Falcon-style internal REJECTs are invisible without reading ActionSubmitted events +
-  `get_action_counts`; never trust the ✅ log line alone.
-
-## Wallets (Sepolia, post-run balances)
-| Role | Wallet | Env file | Balance ~ |
-|---|---|---|---|
-| sponsor | burner C | `.local/burner-c.env` | ~915 STRK |
-| agent | v2 | `.env.local` | ~74 STRK |
-| spare | v1 | backup env | ~3,089 STRK |
-
-Fees ran ~3–5 STRK per invoke during sequencer surge (Aug 24). A full honest round ≈ 30–40 STRK total.
-
-## Remaining queue (after f1)
-2. **f3**: Permissionless close/settle + fixed escrowed prize amount (contract change + redeploy)
-3. Two independent agent wallets (kills the single-wallet limitation noted in evidence)
-4. Cairo tests for `open_submit_action`
-5. Demo video / hub packaging (needs Kyami approval)
+## Steps
+1. Modify `contracts/src/arena.cairo` (+ adapter if Option A) with the chosen
+   mechanism; keep `open_submit_action` backward-compatible or bump selector.
+2. Add Cairo tests in `contracts/tests/` covering: honest transfer, mismatched
+   self-report vs observed delta (must REJECT), non-whitelisted target.
+   Bundle f3 here too: permissionless close/settle + fixed escrowed prize
+   (`prize_cap` honored exactly), since they touch the same file — ONE declare.
+3. `scarb build && scarb test` green locally (Foundry suite currently 31/31+).
+4. Declare new class on Sepolia (~70 STRK — needs Kyami approval) + rerun
+   `scripts/honest-round.mjs` against the new class hash.
+5. Extend crosscheck: assert reported deltas == chain-replayed balances AND ==
+   contract-stored observed values.
 
 ## Definition of done for f1
-See steps 4–5 above. Everything claimed in STATUS.md must be reproducible by running
+Crosscheck proves three-way agreement: script claim == chain balance replay ==
+contract-stored value. Everything in STATUS.md reproducible by running
 `node scripts/open-round-crosscheck.mjs` against the fresh evidence file — exit 0.

@@ -200,3 +200,43 @@ Verified result (all reads on arena `0x58d7…731b`):
 Still open (unchanged): f1 verifiable trade through whitelisted target, f3
 permissionless close/settle + fixed escrowed amount, Cairo tests for
 `open_submit_action`, two independent agent wallets.
+
+
+## Honest round v3 — two wallets + balance-observed values VERIFIED (2026-08-24)
+
+**STATUS: COMPLETE / CHAIN-VERIFIED.** Delivers HANDOFF items #3 (independent
+wallets) and #1 script-side (f1 verifiable trade).
+
+What changed in `scripts/honest-round.mjs` + `scripts/open-round-crosscheck.mjs`:
+1. **TWO independent strategist wallets:** Tortoise = v2 burner (`.env.local`),
+   Falcon = v1 backup (`.local/burner-v1-backup.env`). Registrant == own wallet
+   verified per strategy — the single-wallet limitation is REMOVED.
+2. **Balance-observed trade values (f1, script side):** each wallet's TestUSD
+   float is normalized to exactly 1000 units (deficit minted by sponsor;
+   surplus pushed to the whitelisted target BY THE WALLET — sponsor holds ~0
+   TestUSD), then a REAL `transfer` executes through the whitelisted target and
+   `portfolio_value_before/after` + `allocation_units` are DERIVED from
+   `balance_of` reads taken around it. No invented numbers anywhere.
+3. **Winner recomputed from observed values:** Tortoise 1000→980 (−400bps),
+   Falcon 1000→995 (−100bps) → FALCON wins on-chain; settled 100 TestUSD to
+   Falcon's registrant; escrow drained to 0x0.
+4. **Cross-check extended to 35 checks**, incl. block-historical balance replay
+   (pre/post-tx blocks re-read from chain), ERC-20 `Transfer` keyed-field
+   parsing (`keys=[selector, from, to]`, value in data), and independent score
+   recomputation. Exit 0.
+
+Bugs hit & fixed en route (recorded for reuse):
+- `drawdown_bps` computed from raw wei (2×10¹⁹) → u16 param overflow at
+  estimation; fixed to whole units (`spendUnits / UNIT`).
+- Float-normalization direction matters: surpluses must be spent by the wallet
+  itself (sponsor cannot pull tokens it doesn't hold).
+- Crosscheck plumbing: `starknet_call` block_id requires `{"block_number": N}`;
+  SDK `getTransaction()` omits `block_number` — use the receipt (getBlock by
+  hash as fallback); OZ Transfer events carry from/to as KEYS.
+
+Evidence: `.local/open-round-evidence.json` (status VERIFIED, all tx hashes).
+`npm run verify`: green post-run.
+
+Still open: **f1 contract-side** (Arena derives value deltas itself — removes
+the D012 self-report trust assumption entirely), f3 permissionless close/settle
++ fixed escrowed amount, Cairo tests for `open_submit_action`.
