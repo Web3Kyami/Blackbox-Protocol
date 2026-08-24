@@ -140,8 +140,9 @@ Known pitfalls fixed this phase: SDK double-hashing of hex-string entrypoints (p
 
 - Class hash: `0x072c7b99…` (declared, 69.66 STRK)
 - Arena: `0x3a32…c371`, Adapter: `0x6735…aa06`
-- Both agent actions submitted via `open_submit_action` (direct caller = registrant, no pool needed)
-- Tortoise: +200bps, Falcon: +410bps — **TORTOISE wins** (derived on-chain)
+- Tortoise action submitted via `open_submit_action` and ACCEPTED (+200bps)
+- Falcon action submitted but REJECTED by the contract (reason under investigation)
+- TORTOISE wins by default (only eligible strategy with accepted actions)
 - Prize settled: 100 units TestUSD
 - Evidence: `.local/open-round-evidence.json`
 
