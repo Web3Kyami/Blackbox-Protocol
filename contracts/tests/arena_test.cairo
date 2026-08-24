@@ -324,7 +324,12 @@ fn test_case_study_derives_tortoise_winner() {
     start_cheat_block_timestamp(address, END);
     start_cheat_caller_address(address, AMARA);
     arena.deposit_prize(100);
-    assert_eq!(arena.settle(100), TORTOISE);
+    stop_cheat_caller_address(address);
+
+    // f3: settle is permissionless and pays exactly min(deposited, cap) —
+    // here triggered by a random account, not the sponsor.
+    start_cheat_caller_address(address, OTHER);
+    assert_eq!(arena.settle(), TORTOISE);
     stop_cheat_caller_address(address);
     stop_cheat_block_timestamp(address);
     assert_eq!(arena.get_settlement(), (TORTOISE, 100));
@@ -484,14 +489,27 @@ fn test_unauthorized_action_caller_panics() {
 }
 
 #[test]
-#[should_panic(expected: ('PRIZE_CAP',))]
-fn test_settlement_over_cap_panics() {
-    let (address, arena) = deploy_arena();
+fn test_settlement_clamps_to_prize_cap() {
+    // f3: payout is structurally min(deposited, cap). Depositing over the cap
+    // no longer reverts — the excess simply stays escrowed in the Arena.
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
     arena.register_strategy(FALCON);
     start_cheat_block_timestamp(address, END);
     start_cheat_caller_address(address, AMARA);
     arena.close();
-    arena.settle(101);
+    token.mint(AMARA, 500);
+    start_cheat_caller_address(token.contract_address, AMARA);
+    token.approve(address, 500);
+    stop_cheat_caller_address(token.contract_address);
+    arena.deposit_prize(150);
+    stop_cheat_caller_address(address);
+
+    start_cheat_caller_address(address, OTHER);
+    assert_eq!(arena.settle(), FALCON);
+    stop_cheat_caller_address(address);
+    assert_eq!(arena.get_settlement(), (FALCON, 100));
+    assert_eq!(token.balance_of(address), 50);
 }
 
 #[test]
@@ -665,8 +683,9 @@ fn test_deposit_and_settle_pay_registrant() {
     assert_eq!(arena.get_prize_deposited(), 100);
     assert_eq!(token.balance_of(address), 100);
 
-    start_cheat_caller_address(address, AMARA);
-    assert_eq!(arena.settle(100), TORTOISE);
+    // f3: settle is permissionless — a random account triggers it.
+    start_cheat_caller_address(address, OTHER);
+    assert_eq!(arena.settle(), TORTOISE);
     stop_cheat_caller_address(address);
 
     assert_eq!(arena.get_settlement(), (TORTOISE, 100));
@@ -683,7 +702,7 @@ fn test_settle_without_funded_prize_panics() {
     start_cheat_block_timestamp(address, END);
     start_cheat_caller_address(address, AMARA);
     arena.close();
-    arena.settle(50);
+    arena.settle();
 }
 
 #[test]
@@ -706,4 +725,201 @@ fn test_deposit_prize_zero_panics() {
 fn test_get_prize_token_view() {
     let (_, arena) = deploy_arena();
     assert_eq!(arena.get_prize_token(), ASSET);
+}
+
+// ── f1 contract-side: escrowed actions (contract-observed allocation) ──
+
+const ESCROW_PRICE: u128 = 1_000_000_000_000_000_000; // 1.0, 18 decimals
+
+fn setup_escrowed(
+    token: IMockPrizeTokenDispatcher,
+    address: ContractAddress,
+    arena: IArenaDispatcher,
+) {
+    // Price is already 1.0 (18 decimals) from deploy_arena_with_prize.
+    // Allowlist the DEPLOYED mock token as an action asset and price it at 1.0,
+    // so escrows move real tokens instead of the fake ASSET constant address.
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.add_allowed_asset(token.contract_address);
+    arena.set_price(token.contract_address, ESCROW_PRICE);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    // Bind the strategy to OTHER so it funds its own escrows.
+    start_cheat_caller_address(address, OTHER);
+    arena.register_strategy(FALCON);
+    stop_cheat_caller_address(address);
+    token.mint(OTHER, (10_000_u128 * ESCROW_PRICE).into());
+    start_cheat_caller_address(token.contract_address, OTHER);
+    token.approve(address, (1_000_000_u128 * ESCROW_PRICE).into());
+    stop_cheat_caller_address(token.contract_address);
+}
+
+#[test]
+fn test_escrowed_action_observes_exact_amount() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    let arena_token = IMockPrizeTokenDispatcher { contract_address: token.contract_address };
+    let balance_before = arena_token.balance_of(address);
+    assert_eq!(balance_before, Zero::zero());
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    let verdict = arena.open_submit_action_escrowed(
+        'ESC_1', FALCON, token.contract_address, TARGET, 200, 100,
+    );
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    assert_eq!(verdict, 'ACCEPTED');
+
+    // Contract-OBSERVED: arena balance rose by exactly 200 units × price.
+    assert_eq!(arena_token.balance_of(address) - balance_before, ((200_u128 * ESCROW_PRICE).into()));
+    assert_eq!(arena.get_escrow('ESC_1'), 200);
+    let (accepted, rejected) = arena.get_action_counts(FALCON);
+    assert_eq!(accepted, 1);
+    assert_eq!(rejected, 0);
+    // OTHER paid exactly 200 × price.
+    assert_eq!(token.balance_of(OTHER), ((9_800_u128 * ESCROW_PRICE).into()));
+}
+
+#[test]
+#[should_panic(expected: ('INSUFFICIENT_ALLOWANCE',))]
+fn test_escrowed_action_without_approval_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    // Revoke allowance → transfer_from fails inside the Arena call.
+    start_cheat_caller_address(token.contract_address, OTHER);
+    token.approve(address, 0);
+    stop_cheat_caller_address(token.contract_address);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('NO_ALLOW', FALCON, token.contract_address, TARGET, 100, 0);
+}
+
+#[test]
+#[should_panic(expected: ('INSUFFICIENT_BALANCE',))]
+fn test_escrowed_action_insufficient_balance_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    // Drain OTHER's balance so approval exists but funds don't.
+    start_cheat_caller_address(token.contract_address, OTHER);
+    let bal = token.balance_of(OTHER);
+    token.transfer(AMARA, bal);
+    stop_cheat_caller_address(token.contract_address);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('NO_FUNDS', FALCON, token.contract_address, TARGET, 100, 0);
+}
+
+#[test]
+#[should_panic(expected: ('ALLOC_EXCEED',))]
+fn test_escrowed_allocation_over_cap_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    // current_value=1000, max_allocation_bps=3500 → max 350 units.
+    arena.open_submit_action_escrowed('OVER_CAP', FALCON, token.contract_address, TARGET, 351, 0);
+}
+
+#[test]
+#[should_panic(expected: ('ONLY_REGISTRANT',))]
+fn test_escrowed_non_registrant_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    arena.open_submit_action_escrowed('IMPOSTOR', FALCON, token.contract_address, TARGET, 100, 0);
+}
+
+#[test]
+#[should_panic(expected: ('DUPLICATE',))]
+fn test_escrowed_duplicate_receipt_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('TWICE', FALCON, token.contract_address, TARGET, 50, 0);
+    arena.open_submit_action_escrowed('TWICE', FALCON, token.contract_address, TARGET, 50, 0);
+}
+
+#[test]
+fn test_refund_escrow_returns_bond_after_close() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('REFUND_ME', FALCON, token.contract_address, TARGET, 300, 50);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    assert_eq!(arena.get_escrow('REFUND_ME'), 300);
+
+    start_cheat_block_timestamp(address, END);
+    start_cheat_caller_address(address, AMARA);
+    arena.close();
+    stop_cheat_caller_address(address);
+
+    // Permissionless refund — anyone can trigger; funds go to the registrant.
+    let before = token.balance_of(OTHER);
+    start_cheat_caller_address(address, AMARA);
+    arena.refund_escrow('REFUND_ME');
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+
+    assert_eq!(arena.get_escrow('REFUND_ME'), 0);
+    assert_eq!(token.balance_of(OTHER), before + (300_u128).into());
+}
+
+#[test]
+#[should_panic(expected: ('NO_ESCROW',))]
+fn test_double_refund_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('ONCE_ONLY', FALCON, token.contract_address, TARGET, 100, 0);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+
+    start_cheat_block_timestamp(address, END);
+    start_cheat_caller_address(address, AMARA);
+    arena.close();
+    arena.refund_escrow('ONCE_ONLY');
+    stop_cheat_caller_address(address);
+    // Second refund by a different account: still permissionless, but NO_ESCROW.
+    start_cheat_caller_address(address, OTHER);
+    arena.refund_escrow('ONCE_ONLY');
+}
+
+#[test]
+#[should_panic(expected: ('NOT_CLOSED',))]
+fn test_refund_escrow_before_close_panics() {
+    let token = deploy_prize_token();
+    let (address, arena) = deploy_arena_with_prize(token.contract_address);
+    setup_escrowed(token, address, arena);
+
+    start_cheat_block_timestamp(address, START + 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.open_submit_action_escrowed('HOLD_IT', FALCON, token.contract_address, TARGET, 100, 0);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+
+    arena.refund_escrow('HOLD_IT');
 }

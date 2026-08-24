@@ -82,11 +82,26 @@ pub trait IArena<TState> {
         portfolio_value_after: u128,
         drawdown_bps: u16,
     ) -> felt252;
+    // f1 contract-side: escrowed action — the Arena pulls allocation_units × price
+    // from the registrant and verifies its OWN balance delta (contract-observed
+    // allocation, no caller trust). Value update derives from the observed escrow.
+    fn open_submit_action_escrowed(
+        ref self: TState,
+        receipt_id: felt252,
+        strategy_commitment: felt252,
+        asset: ContractAddress,
+        target: ContractAddress,
+        allocation_units: u128,
+        drawdown_bps: u16,
+    ) -> felt252;
+    fn get_escrow(self: @TState, receipt_id: felt252) -> u128;
+    fn refund_escrow(ref self: TState, receipt_id: felt252);
     fn close(ref self: TState);
     fn deposit_prize(ref self: TState, amount_units: u128);
     fn get_prize_token(self: @TState) -> ContractAddress;
     fn get_prize_deposited(self: @TState) -> u128;
-    fn settle(ref self: TState, amount_units: u128) -> felt252;
+    // f3: permissionless — pays exactly min(prize_deposited, prize_cap_units).
+    fn settle(ref self: TState) -> felt252;
     fn get_settlement(self: @TState) -> (felt252, u128);
     fn get_score(self: @TState, commitment: felt252) -> ScoreEntry;
     fn get_action_counts(self: @TState, commitment: felt252) -> (u32, u32);
@@ -128,6 +143,8 @@ pub mod Arena {
         pub const STALE_PRICE: felt252 = 'STALE_PRICE';
         pub const BAD_VALUE: felt252 = 'BAD_VALUE';
         pub const ALLOCATION_EXCEEDED: felt252 = 'ALLOC_EXCEED';
+        pub const AMOUNT_MISMATCH: felt252 = 'AMT_MISMATCH';
+        pub const NO_ESCROW: felt252 = 'NO_ESCROW';
     }
 
     #[storage]
@@ -157,6 +174,10 @@ pub mod Arena {
         commitments: Map<u32, felt252>,
         strategies: Map<felt252, StrategyState>,
         receipts: Map<felt252, bool>,
+        // f1: escrowed allocation per receipt (contract-observed via balance delta)
+        escrows: Map<felt252, u128>,
+        escrow_registrants: Map<felt252, ContractAddress>,
+        escrow_assets: Map<felt252, ContractAddress>,
     }
 
     #[event]
@@ -164,6 +185,8 @@ pub mod Arena {
     enum Event {
         StrategyRegistered: StrategyRegistered,
         ActionSubmitted: ActionSubmitted,
+        ActionEscrowed: ActionEscrowed,
+        EscrowRefunded: EscrowRefunded,
         ActionReceipt: ActionReceipt,
         ArenaClosed: ArenaClosed,
         ActionAdapterSet: ActionAdapterSet,
@@ -180,6 +203,25 @@ pub mod Arena {
         commitment: felt252,
         registration_order: u32,
         registrant: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct ActionEscrowed {
+        #[key]
+        receipt_id: felt252,
+        #[key]
+        strategy_commitment: felt252,
+        asset: ContractAddress,
+        observed_units: u128,
+        accepted: bool,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct EscrowRefunded {
+        #[key]
+        receipt_id: felt252,
+        recipient: ContractAddress,
+        units: u128,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -494,6 +536,96 @@ pub mod Arena {
             if accepted { 'ACCEPTED' } else { 'REJECTED' }
         }
 
+        // f1 contract-side: escrowed action. The Arena pulls allocation_units × price
+        // from the registrant via transfer_from, then verifies its OWN balance delta —
+        // the observed amount is contract-authoritative (no caller-trusted amounts).
+        // All validations revert (no soft-reject path); the event marks acceptance.
+        fn open_submit_action_escrowed(
+            ref self: ContractState,
+            receipt_id: felt252,
+            strategy_commitment: felt252,
+            asset: ContractAddress,
+            target: ContractAddress,
+            allocation_units: u128,
+            drawdown_bps: u16,
+        ) -> felt252 {
+            let caller = get_caller_address();
+            let strategy = self.strategies.read(strategy_commitment);
+            assert(strategy.registered, errors::UNREGISTERED);
+            assert(caller == strategy.registrant, errors::ONLY_REGISTRANT);
+            let now = get_block_timestamp();
+            assert(
+                now >= self.start_time.read()
+                    && now <= self.end_time.read()
+                    && !self.closed.read(),
+                errors::BAD_TIME,
+            );
+            assert(!self.receipts.read(receipt_id), errors::DUPLICATE);
+            assert(self.allowed_assets.read(asset), errors::BAD_ASSET);
+            assert(self.allowed_targets.read(target), errors::BAD_TARGET);
+            assert(self.price_timestamp.read(asset) != 0, errors::STALE_PRICE);
+            assert(drawdown_bps <= 10000, errors::BAD_VALUE);
+            assert(
+                allocation_units * 10000
+                    <= strategy.current_value * self.max_allocation_bps.read().into(),
+                errors::ALLOCATION_EXCEEDED,
+            );
+
+            // Pull allocation × price from the registrant and observe the delta ourselves.
+            let token = IPrizeTokenDispatcher { contract_address: asset };
+            let price = self.latest_price.read(asset);
+            assert(price.is_non_zero(), errors::STALE_PRICE);
+            let expected: u256 = allocation_units.into() * price.into();
+            let balance_before = token.balance_of(get_contract_address());
+            let transferred = token.transfer_from(caller, get_contract_address(), expected);
+            assert(transferred, errors::PRIZE_TRANSFER_FAILED);
+            let observed_delta = token.balance_of(get_contract_address()) - balance_before;
+            // Strict: the pull must deliver exactly units × price (fee-on-transfer
+            // or rounding skims would short the escrow).
+            assert(observed_delta == expected, errors::AMOUNT_MISMATCH);
+            // Convert the OBSERVED delta back to allocation-unit terms.
+            let observed_units: u128 = (observed_delta / price.into()).try_into().unwrap();
+            assert(observed_units == allocation_units, errors::AMOUNT_MISMATCH);
+
+            self.receipts.write(receipt_id, true);
+            self.escrows.write(receipt_id, observed_units);
+            self.escrow_registrants.write(receipt_id, caller);
+            self.escrow_assets.write(receipt_id, asset);
+            let mut s = self.strategies.read(strategy_commitment);
+            s.accepted_actions += 1;
+            if drawdown_bps > s.max_drawdown_bps {
+                s.max_drawdown_bps = drawdown_bps;
+            }
+            self.strategies.write(strategy_commitment, s);
+
+            self.emit(ActionEscrowed {
+                receipt_id,
+                strategy_commitment,
+                asset,
+                observed_units,
+                accepted: true,
+            });
+            'ACCEPTED'
+        }
+
+        fn get_escrow(self: @ContractState, receipt_id: felt252) -> u128 {
+            self.escrows.read(receipt_id)
+        }
+
+        // Permissionless after close: returns the bonded allocation to its registrant.
+        fn refund_escrow(ref self: ContractState, receipt_id: felt252) {
+            assert(self.closed.read(), errors::NOT_CLOSED);
+            let units = self.escrows.read(receipt_id);
+            assert(units.is_non_zero(), errors::NO_ESCROW);
+            let recipient = self.escrow_registrants.read(receipt_id);
+            let asset = self.escrow_assets.read(receipt_id);
+            self.escrows.write(receipt_id, 0);
+            let token = IPrizeTokenDispatcher { contract_address: asset };
+            let transferred = token.transfer(recipient, units.into());
+            assert(transferred, errors::PRIZE_TRANSFER_FAILED);
+            self.emit(EscrowRefunded { receipt_id, recipient, units });
+        }
+
 
         fn deposit_prize(ref self: ContractState, amount_units: u128) {
             let caller = get_caller_address();
@@ -515,14 +647,21 @@ pub mod Arena {
             self.prize_deposited.read()
         }
 
-        fn settle(ref self: ContractState, amount_units: u128) -> felt252 {
-            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+        fn settle(ref self: ContractState) -> felt252 {
+            // f3: permissionless after close — anyone may trigger settlement.
             assert(self.closed.read(), errors::NOT_CLOSED);
             assert(!self.settled.read(), errors::ALREADY_SETTLED);
-            assert(amount_units <= self.prize_cap_units.read(), errors::PRIZE_CAP);
+            // Exact structural payout: everything deposited up to the cap. No
+            // caller-supplied amount → the sponsor cannot underpay the winner.
+            let mut amount_units = self.prize_deposited.read();
+            let cap = self.prize_cap_units.read();
+            if amount_units > cap {
+                amount_units = cap;
+            };
             let winner = self.get_winner();
             let recipient = self.strategies.read(winner).registrant;
             assert(recipient.is_non_zero(), errors::PRIZE_NO_REGISTRANT);
+            assert(amount_units.is_non_zero(), errors::INSUFFICIENT_PRIZE);
             let token = IPrizeTokenDispatcher { contract_address: self.prize_token.read() };
             let balance = token.balance_of(get_contract_address());
             assert(balance >= amount_units.into(), errors::INSUFFICIENT_PRIZE);

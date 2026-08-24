@@ -240,3 +240,42 @@ Evidence: `.local/open-round-evidence.json` (status VERIFIED, all tx hashes).
 Still open: **f1 contract-side** (Arena derives value deltas itself — removes
 the D012 self-report trust assumption entirely), f3 permissionless close/settle
 + fixed escrowed amount, Cairo tests for `open_submit_action`.
+
+
+## Cairo pass — escrowed actions (f1 contract-side) + permissionless settle DONE (2026-08-24)
+
+**STATUS: COMPLETE / TESTED (47/47 snforge, 40/40 npm verify).** Contract
+changes in `contracts/src/arena.cairo`:
+
+1. **f1 contract-side — `open_submit_action_escrowed`:** the Arena PULLS
+   `allocation_units × price` from the registrant via `transfer_from`, then
+   verifies its OWN balance delta around the pull (`balance_before` /
+   `balance_after` reads) and stores the OBSERVED units per receipt
+   (`get_escrow`). Strict equality `observed_delta == units × price` rejects
+   fee-on-transfer skims. All validation reverts (fail-closed); `ActionEscrowed`
+   event emitted on acceptance. This is contract-observed allocation — no
+   caller-trusted amounts on the allocation axis.
+2. **f3 — permissionless lifecycle:** `settle()` now takes NO amount param and
+   any account may call it post-close; payout is structurally
+   `min(prize_deposited, prize_cap_units)` → sponsor cannot underpay.
+   Depositing over cap no longer reverts (excess stays escrowed).
+   `refund_escrow(receipt_id)` is permissionless post-close and returns the
+   bond to its registrant exactly once (`NO_ESCROW` guard, zeroed first —
+   checks-effects-interactions). New errors: `AMT_MISMATCH`, `NO_ESCROW`.
+3. **Tests:** 9 new tests (exact observation incl. balance deltas at 18-dec
+   price, no-approval, insufficient balance, over-cap allocation, non-registrant,
+   duplicate receipt, refund happy path, refund before close, double refund)
+   + suite updated for new settle signature; cap-clamp test replaces old
+   PRIZE_CAP panic test.
+
+Honest limitation (unchanged): portfolio_value tracking remains strategy-reported
+(Starknet contracts cannot read historical wallet balances or enumerate their own
+tx events). The enforced monotone chain + escrowed allocations are the current
+trust boundary; full value-derivation needs an oracle/pool-integration design.
+
+Toolchain notes: tests need the glibc scarb build (`~/.local/scarb-gnu`) because
+the musl scarb cannot dlopen proc macros; snforge CLI must match pinned
+`snforge_std` (downgraded to 0.59.0 via `snfoundryup -v 0.59.0`).
+
+Next: declare the new Arena class on Sepolia (~70 STRK, needs approval) and rerun
+the honest round against it using `open_submit_action_escrowed`.
