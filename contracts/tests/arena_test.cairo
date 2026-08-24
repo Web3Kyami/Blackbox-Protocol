@@ -776,7 +776,7 @@ fn test_escrowed_action_observes_exact_amount() {
 
     // Contract-OBSERVED: arena balance rose by exactly 200 units × price.
     assert_eq!(arena_token.balance_of(address) - balance_before, ((200_u128 * ESCROW_PRICE).into()));
-    assert_eq!(arena.get_escrow('ESC_1'), 200);
+    assert_eq!(arena.get_escrow('ESC_1'), (200_u128 * ESCROW_PRICE).into());
     let (accepted, rejected) = arena.get_action_counts(FALCON);
     assert_eq!(accepted, 1);
     assert_eq!(rejected, 0);
@@ -867,7 +867,7 @@ fn test_refund_escrow_returns_bond_after_close() {
     arena.open_submit_action_escrowed('REFUND_ME', FALCON, token.contract_address, TARGET, 300, 50);
     stop_cheat_caller_address(address);
     stop_cheat_block_timestamp(address);
-    assert_eq!(arena.get_escrow('REFUND_ME'), 300);
+    assert_eq!(arena.get_escrow('REFUND_ME'), (300_u128 * ESCROW_PRICE).into());
 
     start_cheat_block_timestamp(address, END);
     start_cheat_caller_address(address, AMARA);
@@ -882,7 +882,7 @@ fn test_refund_escrow_returns_bond_after_close() {
     stop_cheat_block_timestamp(address);
 
     assert_eq!(arena.get_escrow('REFUND_ME'), 0);
-    assert_eq!(token.balance_of(OTHER), before + (300_u128).into());
+    assert_eq!(token.balance_of(OTHER), before + ((300_u128 * ESCROW_PRICE).into()));
 }
 
 #[test]

@@ -33,7 +33,7 @@ console.log("[sponsor]", sponsor.address.slice(0, 20) + "…");
 console.log("[tortoise]", tortoiseWallet.address.slice(0, 20) + "…");
 console.log("[falcon] ", falconWallet.address.slice(0, 20) + "…");
 
-const NEW_ARENA_CLASS = "0x72c7b997f3e71897104d9be470d9d7c4cafd08330dfd0617a38a5bfa2a0c54b";
+const NEW_ARENA_CLASS = "0xf170ef4c00bc63e512b0487caee09baf44d7ac19c82c27ef86707e277b9bd7";
 const ADAPTER_CLASS = "0x046da51ea1b9b2b311156503dff3812d1fafd1a8cf1408f0a477197eb47f86b0";
 const USD_TOKEN = "0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386";
 const TRADE_TARGET = "0x123456789"; // whitelisted action target (also the float overflow sink)
@@ -115,7 +115,8 @@ function deployedAddress(deployResult) {
 // ── Evidence accumulator (fail-closed) ──
 const evidence = {
     network: "sepolia",
-    test: "honest round v3 (two independent wallets + balance-observed trade values)",
+    test: "honest round v4 (escrowed contract-observed actions + permissionless lifecycle)",
+    sponsor_address: sponsor.address,
     started_at: new Date().toISOString(),
     arena_class_hash: NEW_ARENA_CLASS,
     adapter_class_hash: ADAPTER_CLASS,
@@ -308,6 +309,26 @@ async function runMain() {
         const counts = await viewOn(ARENA_ADDR, "get_action_counts", [commitment]);
         const acc = Number(counts[0]), rej = Number(counts[1]);
         console.log(`[verify] ${label} action counts on THE arena: accepted=${acc} rejected=${rej}`);
+
+        // ── f1 contract-side: ESCROWED action ──
+        // The Arena PULLS allocation_units × price from this wallet via transfer_from
+        // and verifies its OWN balance delta — the stored escrow is contract-observed,
+        // no caller-trusted amount. Uses its own receipt id (receipt ids are consumed).
+        const UNIT_BIG = UNIT;
+        const escrowUnits = BigInt(delta);
+        const escReceiptId = "0x" + Buffer.from(`${label.toLowerCase()}-h002e`).toString("hex");
+        const { tx: apprEscTx } = await sendTx(wallet, `approve-escrow:${label}`, [{
+            contractAddress: USD_TOKEN, entrypoint: "approve",
+            calldata: [ARENA_ADDR, "0x" + (escrowUnits * UNIT_BIG).toString(16), "0"],
+        }]);
+        const { tx: escTx } = await sendTx(wallet, `escrow-action:${label}`, [{
+            contractAddress: ARENA_ADDR, entrypoint: "open_submit_action_escrowed",
+            calldata: [escReceiptId, commitment, USD_TOKEN, TRADE_TARGET, escrowUnits.toString(), String(allocBpsOfValue)],
+        }]);
+        const storedEscrow = BigInt((await viewOn(ARENA_ADDR, "get_escrow", [escReceiptId]))[0]);
+        if (storedEscrow !== escrowUnits * UNIT_BIG) throw new Error(`FAIL-CLOSED: ${label} contract-stored escrow ${storedEscrow} != claimed ${escrowUnits} × unit`);
+        console.log(`[verify] ${label} contract-stored escrow = ${storedEscrow} raw (contract-observed custody)`);
+
         return {
             label, tx: tx.transaction_hash, submit_tx: call.tx.transaction_hash, receipt_id: receiptIdHex,
             verdict: accepted === null ? "NO_EVENT" : accepted ? "ACCEPTED" : "REJECTED", accepted,
@@ -316,6 +337,11 @@ async function runMain() {
             pre_balance_units: preUnits, post_balance_units: afterUnits,
             allocation_units: delta, portfolio_value_before: preUnits, portfolio_value_after: afterUnits,
             drawdown_bps: allocBpsOfValue,
+            escrow: {
+                receipt_id: escReceiptId, approve_tx: apprEscTx.transaction_hash, tx: escTx.transaction_hash,
+                claimed_units: Number(escrowUnits), stored_units: Number(storedEscrow),
+                stored_raw: storedEscrow.toString(),
+            },
         };
     }
 
@@ -342,19 +368,37 @@ async function runMain() {
     }
     step("advance_blocks", { mints: 2 });
 
-    const { tx: closeTx } = await sendTx(sponsor, "close", [{ contractAddress: ARENA_ADDR, entrypoint: "close", calldata: [] }]);
-    step("close", { tx: closeTx.transaction_hash });
+    // f3 LIVE PROOF: close is permissionless — called by TORTOISE (not the sponsor).
+    const { tx: closeTx } = await sendTx(tortoiseWallet, "close", [{ contractAddress: ARENA_ADDR, entrypoint: "close", calldata: [] }]);
+    step("close", { tx: closeTx.transaction_hash, caller: "tortoise (non-sponsor)" });
 
     const winnerResult = await viewOn(ARENA_ADDR, "get_winner");
     const winnerCommitment = winnerResult[0];
     const winnerName = winnerCommitment === falconCommitment ? "FALCON" : winnerCommitment === tortoiseCommitment ? "TORTOISE" : `UNKNOWN(${winnerCommitment})`;
     console.log("[winner]", winnerName, winnerCommitment);
 
-    const { tx: settleTx } = await sendTx(sponsor, "settle", [{ contractAddress: ARENA_ADDR, entrypoint: "settle", calldata: ["100"] }]);
+    // f3 LIVE PROOF: settle() takes NO amount — payout is structurally
+    // min(deposited, cap) — and is permissionless: called by FALCON (non-sponsor).
+    const { tx: settleTx } = await sendTx(falconWallet, "settle", [{ contractAddress: ARENA_ADDR, entrypoint: "settle", calldata: [] }]);
     const settlement = await viewOn(ARENA_ADDR, "get_settlement");
     assertEq(settlement[0], winnerCommitment, "settled winner == derived winner");
-    assertEq(settlement[1], 100n, "settled amount == 100");
-    step("settle", { tx: settleTx.transaction_hash, winner: winnerName, amount: Number(BigInt(settlement[1])) });
+    assertEq(settlement[1], 100n, "settled amount == prize deposited");
+    step("settle", { tx: settleTx.transaction_hash, caller: "falcon (non-sponsor)", winner: winnerName, amount: Number(BigInt(settlement[1])) });
+
+    // f3 LIVE PROOF: escrowed bonds are refunded to their registrants after close.
+    for (const res of [tRes, fRes]) {
+        const w = res.label === "Tortoise" ? tortoiseWallet : falconWallet;
+        const balBefore = BigInt((await viewOn(USD_TOKEN, "balance_of", [w.address]))[0]);
+        const { tx: refTx } = await sendTx(w, `refund:${res.label}`, [{ contractAddress: ARENA_ADDR, entrypoint: "refund_escrow", calldata: [res.escrow.receipt_id] }]);
+        const balAfter = BigInt((await viewOn(USD_TOKEN, "balance_of", [w.address]))[0]);
+        if (balAfter - balBefore !== BigInt(res.escrow.stored_raw ?? res.escrow.stored_units) ) {
+            throw new Error(`FAIL-CLOSED: ${res.label} refund delta mismatch (got ${balAfter - balBefore}, expected ${res.escrow.stored_raw ?? res.escrow.stored_units})`);
+        }
+        console.log(`[verify] ${res.label} refund returned ${balAfter - balBefore} raw (bond restored)`);
+        res.escrow.refunded = true;
+        res.escrow.refund_tx = refTx.transaction_hash;
+    }
+    step("refunds", { tortoise: tRes.escrow.refunded, falcon: fRes.escrow.refunded });
 
     // Final independent cross-checks against chain state (the whole point of this fix).
     const finalCountsT = await viewOn(ARENA_ADDR, "get_action_counts", [tortoiseCommitment]);
@@ -370,11 +414,13 @@ async function runMain() {
         winner: winnerName,
         settlement_amount: Number(BigInt(settlement[1])),
         value_observation: "portfolio_value_after derived from balance_of reads around real transfers",
+        escrow_observation: "open_submit_action_escrowed — contract pulled units×price and stored its own observed delta per receipt; bonds refunded post-close",
+        permissionless_lifecycle: { closed_by: "tortoise (non-sponsor)", settled_by: "falcon (non-sponsor)", settle_param: "none — payout = min(deposited, cap)" },
     };
 
     console.log(`
 ════════════════════════════════════════
-  HONEST ROUND v3 — TWO WALLETS, BALANCE-OBSERVED VALUES — CHAIN-VERIFIED
+  HONEST ROUND v4 — ESCROWED ACTIONS + PERMISSIONLESS LIFECYCLE
 
   Arena:   ${ARENA_ADDR}
   Winner:  ${winnerName} (derived on-chain, settled)

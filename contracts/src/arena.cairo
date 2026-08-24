@@ -94,12 +94,13 @@ pub trait IArena<TState> {
         allocation_units: u128,
         drawdown_bps: u16,
     ) -> felt252;
-    fn get_escrow(self: @TState, receipt_id: felt252) -> u128;
+    fn get_escrow(self: @TState, receipt_id: felt252) -> u256;
     fn refund_escrow(ref self: TState, receipt_id: felt252);
     fn close(ref self: TState);
     fn deposit_prize(ref self: TState, amount_units: u128);
     fn get_prize_token(self: @TState) -> ContractAddress;
     fn get_prize_deposited(self: @TState) -> u128;
+    fn get_prize_cap(self: @TState) -> u128;
     // f3: permissionless — pays exactly min(prize_deposited, prize_cap_units).
     fn settle(ref self: TState) -> felt252;
     fn get_settlement(self: @TState) -> (felt252, u128);
@@ -175,7 +176,7 @@ pub mod Arena {
         strategies: Map<felt252, StrategyState>,
         receipts: Map<felt252, bool>,
         // f1: escrowed allocation per receipt (contract-observed via balance delta)
-        escrows: Map<felt252, u128>,
+        escrows: Map<felt252, u256>,
         escrow_registrants: Map<felt252, ContractAddress>,
         escrow_assets: Map<felt252, ContractAddress>,
     }
@@ -214,6 +215,7 @@ pub mod Arena {
         asset: ContractAddress,
         observed_units: u128,
         accepted: bool,
+        escrowed_raw: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -221,7 +223,7 @@ pub mod Arena {
         #[key]
         receipt_id: felt252,
         recipient: ContractAddress,
-        units: u128,
+        raw_amount: u256,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -484,7 +486,9 @@ pub mod Arena {
         }
 
         fn close(ref self: ContractState) {
-            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            // f3: permissionless after end_time — closing is an inevitable state
+            // transition with no griefing vector (actions already blocked past end;
+            // winner derivation is deterministic). Anyone may finalize the arena.
             assert(get_block_timestamp() >= self.end_time.read(), errors::BAD_TIME);
             assert(!self.closed.read(), errors::ALREADY_CLOSED);
             self.closed.write(true);
@@ -588,7 +592,9 @@ pub mod Arena {
             assert(observed_units == allocation_units, errors::AMOUNT_MISMATCH);
 
             self.receipts.write(receipt_id, true);
-            self.escrows.write(receipt_id, observed_units);
+            // Store the RAW amount pulled — refund returns exactly what was
+            // escrowed regardless of any later price change on this asset.
+            self.escrows.write(receipt_id, observed_delta);
             self.escrow_registrants.write(receipt_id, caller);
             self.escrow_assets.write(receipt_id, asset);
             let mut s = self.strategies.read(strategy_commitment);
@@ -604,11 +610,12 @@ pub mod Arena {
                 asset,
                 observed_units,
                 accepted: true,
+                escrowed_raw: observed_delta,
             });
             'ACCEPTED'
         }
 
-        fn get_escrow(self: @ContractState, receipt_id: felt252) -> u128 {
+        fn get_escrow(self: @ContractState, receipt_id: felt252) -> u256 {
             self.escrows.read(receipt_id)
         }
 
@@ -623,7 +630,7 @@ pub mod Arena {
             let token = IPrizeTokenDispatcher { contract_address: asset };
             let transferred = token.transfer(recipient, units.into());
             assert(transferred, errors::PRIZE_TRANSFER_FAILED);
-            self.emit(EscrowRefunded { receipt_id, recipient, units });
+            self.emit(EscrowRefunded { receipt_id, recipient, raw_amount: units });
         }
 
 
@@ -645,6 +652,10 @@ pub mod Arena {
 
         fn get_prize_deposited(self: @ContractState) -> u128 {
             self.prize_deposited.read()
+        }
+
+        fn get_prize_cap(self: @ContractState) -> u128 {
+            self.prize_cap_units.read()
         }
 
         fn settle(ref self: ContractState) -> felt252 {

@@ -106,6 +106,73 @@ for (const act of [tAct, fAct]) {
     check(`${act.label} transfer went to whitelisted target`, BigInt(xfer?.keys?.[2] ?? 0n) === 0x123456789n);
 }
 
+// 8b) ESCROW (f1 contract-side): contract-observed bond in RAW terms, re-derived independently
+for (const act of [tAct, fAct]) {
+    const esc = act.escrow;
+    if (!esc) { check(`${act.label} escrow data present`, false); continue; }
+    // Contract-stored custody amount matches the claimed RAW pull (units × price)
+    check(`${act.label} get_escrow(stored on chain) == claimed raw`, BigInt((await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]) === BigInt(esc.stored_raw),
+        `${(await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]} vs ${esc.stored_raw}`);
+    // ActionEscrowed event FROM THE ARENA:
+    // keys=[selector, receipt_id, strategy_commitment]
+    // data=[asset, observed_units(u128), accepted(felt bool), raw_lo, raw_hi]
+    const rcpt = await provider.getTransactionReceipt(esc.tx);
+    const evs = (rcpt.events ?? []).filter(e => BigInt(e.from_address) === BigInt(arena)
+        && e.keys.length === 3 && BigInt(e.keys[1]) === BigInt(esc.receipt_id));
+    check(`${act.label} escrow event emitted by arena`, evs.length >= 1);
+    if (evs.length >= 1) {
+        const d = evs[0].data;
+        check(`${act.label} event observed_units == claimed units`, BigInt(d[1]) === BigInt(esc.claimed_units), String(d[1]));
+        check(`${act.label} event accepted flag`, BigInt(d[2]) === 1n);
+        const evRaw = BigInt(d[3]) + (BigInt(d[4]) << 128n);
+        check(`${act.label} event escrowed_raw == stored raw`, evRaw === BigInt(esc.stored_raw), `${evRaw} vs ${esc.stored_raw}`);
+    }
+    // Independent wallet-side replay: strategist paid exactly the stored raw at the escrow tx
+    const n = await blockNumberOf(rcpt);
+    const w = act.operator;
+    const pre = await balanceAt(n - 1, w), post = await balanceAt(n, w);
+    check(`${act.label} escrow pull == stored raw (wallet replay)`, pre - post === BigInt(esc.stored_raw),
+        `${pre - post} vs ${esc.stored_raw}`);
+    // Bond returned post-close: refund tx succeeded AND escrow zeroed AND
+    // EscrowRefunded event carries recipient + exact raw amount.
+    const refRcpt = await provider.getTransactionReceipt(esc.refund_tx);
+    check(`${act.label} refund tx succeeded`, refRcpt.execution_status === "SUCCEEDED", refRcpt.execution_status);
+    check(`${act.label} escrow zeroed after refund`, BigInt((await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]) === 0n);
+    const refEvs = (refRcpt.events ?? []).filter(e => BigInt(e.from_address) === BigInt(arena)
+        && e.keys.length === 2 && BigInt(e.keys[1]) === BigInt(esc.receipt_id));
+    check(`${act.label} EscrowRefunded event emitted`, refEvs.length >= 1);
+    if (refEvs.length >= 1) {
+        check(`${act.label} refunded to strategist`, BigInt(refEvs[0].data[1]) === BigInt(w));
+        const refRaw = BigInt(refEvs[0].data[2]) + (BigInt(refEvs[0].data[3]) << 128n);
+        check(`${act.label} refunded raw == escrowed raw`, refRaw === BigInt(esc.stored_raw));
+    }
+}
+
+// 8c) PERMISSIONLESS LIFECYCLE (f3): close/settle senders were NOT the sponsor
+const sponsorAddr = ev.sponsor_address;
+async function txSender(txHash) {
+    const t = await provider.getTransactionByHash(txHash);
+    return t.sender_address;
+}
+if (sponsorAddr) {
+    check("close called by non-sponsor (tortoise)", BigInt(await txSender(stepOf("close").tx)) !== BigInt(sponsorAddr));
+    check("settle called by non-sponsor (falcon)", BigInt(await txSender(stepOf("settle").tx)) !== BigInt(sponsorAddr));
+} else {
+    console.log("⚠ sponsor_address missing in evidence — permissionless-sender checks skipped");
+}
+// settle() structural payout: amount param is gone — settlement == min(deposited, cap)
+check("settlement == min(prize_deposited, cap)", Number(BigInt(sett[1])) === Math.min(
+    Number(BigInt((await viewOn(arena, "get_prize_deposited"))[0])),
+    Number(BigInt((await viewOn(arena, "get_prize_cap"))[0]))));
+
+// 8d) Post-round float restoration: each strategist back to a round number ≥ trade cost
+for (const [act] of [[tAct], [fAct]]) {
+    const w = act.operator;
+    const bal = BigInt((await viewOn(ev.usd_token, "balance_of", [w]))[0]);
+    check(`${act.label} float restored after refund (≥ ${act.portfolio_value_after} units)`,
+        bal >= BigInt(act.portfolio_value_after) * UNIT, String(bal / UNIT));
+}
+
 // 9) Every recorded tx hash exists and SUCCEEDED
 for (const s of ev.steps) {
     const hashes = Object.entries(s).filter(([k, v]) => k !== "step" && typeof v === "string" && /^0x[0-9a-f]{60,70}$/.test(v) && /tx|Tx/.test(k));
