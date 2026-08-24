@@ -110,9 +110,14 @@ for (const act of [tAct, fAct]) {
 for (const act of [tAct, fAct]) {
     const esc = act.escrow;
     if (!esc) { check(`${act.label} escrow data present`, false); continue; }
-    // Contract-stored custody amount matches the claimed RAW pull (units × price)
-    check(`${act.label} get_escrow(stored on chain) == claimed raw`, BigInt((await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]) === BigInt(esc.stored_raw),
-        `${(await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]} vs ${esc.stored_raw}`);
+    // Contract-stored custody: BEFORE refund == claimed raw; AFTER refund == 0.
+    const escNow = BigInt((await viewOn(arena, "get_escrow", [esc.receipt_id]))[0]);
+    if (esc.refund_tx) {
+        check(`${act.label} get_escrow == 0 after executed refund`, escNow === 0n);
+    } else {
+        check(`${act.label} get_escrow(stored on chain) == claimed raw`, escNow === BigInt(esc.stored_raw),
+            `${escNow} vs ${esc.stored_raw}`);
+    }
     // ActionEscrowed event FROM THE ARENA:
     // keys=[selector, receipt_id, strategy_commitment]
     // data=[asset, observed_units(u128), accepted(felt bool), raw_lo, raw_hi]
@@ -142,8 +147,9 @@ for (const act of [tAct, fAct]) {
         && e.keys.length === 2 && BigInt(e.keys[1]) === BigInt(esc.receipt_id));
     check(`${act.label} EscrowRefunded event emitted`, refEvs.length >= 1);
     if (refEvs.length >= 1) {
-        check(`${act.label} refunded to strategist`, BigInt(refEvs[0].data[1]) === BigInt(w));
-        const refRaw = BigInt(refEvs[0].data[2]) + (BigInt(refEvs[0].data[3]) << 128n);
+        // EscrowRefunded: keys=[selector, receipt_id], data=[recipient, raw_lo, raw_hi]
+        check(`${act.label} refunded to strategist`, BigInt(refEvs[0].data[0]) === BigInt(w));
+        const refRaw = BigInt(refEvs[0].data[1]) + (BigInt(refEvs[0].data[2]) << 128n);
         check(`${act.label} refunded raw == escrowed raw`, refRaw === BigInt(esc.stored_raw));
     }
 }
@@ -166,6 +172,7 @@ check("settlement == min(prize_deposited, cap)", Number(BigInt(sett[1])) === Mat
     Number(BigInt((await viewOn(arena, "get_prize_cap"))[0]))));
 
 // 8d) Post-round float restoration: each strategist back to a round number ≥ trade cost
+const UNIT = 10n ** 18n;
 for (const [act] of [[tAct], [fAct]]) {
     const w = act.operator;
     const bal = BigInt((await viewOn(ev.usd_token, "balance_of", [w]))[0]);

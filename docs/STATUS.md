@@ -279,3 +279,40 @@ the musl scarb cannot dlopen proc macros; snforge CLI must match pinned
 
 Next: declare the new Arena class on Sepolia (~70 STRK, needs approval) and rerun
 the honest round against it using `open_submit_action_escrowed`.
+
+## Honest round v4 — COMPLETE & chain-verified (Aug 24, 2026)
+
+1. **Raw-custody fix:** first v4 run fail-closed at refund — escrows were stored
+   in unit terms but refunded raw (`20` wei of `20e18`). Fixed: custody stored in
+   RAW u256 (`Map<felt252,u256>`), price-change-proof refunds;
+   `ActionEscrowed` emits units+raw, `EscrowRefunded` emits raw_amount.
+   Found by the round script's raw-balance gate, NOT by Cairo tests (both sides
+   shared the units convention). 47/47 green after fix; commit `76900dd`.
+2. **Declares:** class `0xf170ef4c…b9bd7` declared on Sepolia ✅ (~39 STRK actual;
+   earlier sibling `0x42a180…2813` also live). Fee learning: balance validation
+   counts `tip × Σmax_amount` — big declares need tip=0 or tiny tip (§14 pitfalls).
+3. **Round v4 result:** deploy→setup→register×2→prize→trades (T1000→980,
+   F1000→995)→adapter actions→escrowed actions (pulled+observed 2e19/5e18 raw)→
+   permissionless close(Tortoise)/settle(Falcon)→FALCON paid 100→refunds exact.
+   Exit 0, every write receipt+event verified in-script.
+4. **Crosscheck PASSED (exit 0):** winner recomputed from chain balances, prize
+   drained, escrow event==stored==wallet-replay pull, refunds zero escrow +
+   exact raw back, permissionless callers proven via tx sender. Three-way
+   agreement: script claim == chain replay == contract-stored escrow.
+
+### Dummy/demo-data audit (Kyami ask)
+- `contracts/src`: clean — no demo constants, no test-only paths.
+- `scripts/honest-round.mjs`: `TRADE_TARGET=0x123456789` is an intentional
+  whitelisted trade target for rehearsal; mainnet must bind real venue adapters.
+- `contracts/tests`, JS tests: fixtures only, appropriate.
+- `apps/web/src/app.mjs` L580: dashboard hardwires
+  `http://127.0.0.1:4174/api/devnet/session` (devnet-session service). Honestly
+  labeled "Devnet Active", but there is NO public-RPC mode yet → UI wiring is a
+  required mainnet item.
+
+### Mainnet verdict (post-v4)
+Sepolia rehearsal is functionally complete. Remaining before mainnet:
+(a) value-axis design decision — adapter-reported vs oracle/pool-derived
+(strategy-reported values remain the trust hole); (b) external security review
+of arena.cairo (now holds custody); (c) dashboard off devnet-session onto public
+RPC; (d) ops: funded mainnet sponsor wallet, monitoring, fee budget per §14.
