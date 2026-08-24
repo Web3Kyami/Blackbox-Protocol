@@ -1,11 +1,13 @@
-// Honest Sepolia round: real commitments, verified actions, on-chain state checks.
-// Uses C as sponsor, V2 as both agents (single-wallet limitation noted).
-import { readFileSync } from "node:fs";
+// Honest Sepolia round v2 — HANDOFF fix: ONE arenaAddr scoped through EVERY step.
+// Flow: deploy(Arena,Adapter) → setup → register(agent) → prize → actions → close → settle.
+// Every write is verified via view calls ON THE SAME arenaAddr (skill: onchain-verify-not-logs).
+// Fail-closed: any verification mismatch aborts the run and marks the evidence FAILED.
+// Known limitation (documented): both strategies operate from the agent wallet (f-fix pending).
+import { readFileSync, copyFileSync, existsSync, writeFileSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
-const { Account, RpcProvider, hash } = await import("/root/projects/BlackBox Arena/_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js");
-
-// ── Config ──
 const ROOT = "/root/projects/BlackBox Arena";
+const { Account, RpcProvider, hash } = await import(`${ROOT}/_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js`);
+
 let ALCHEMY_KEY = "";
 for (const l of readFileSync(`${ROOT}/.env.local`, "utf8").split("\n")) {
     if (l.startsWith("ALCHEMY_API_KEY=")) ALCHEMY_KEY = l.split("=").slice(1).join("=").trim();
@@ -26,219 +28,314 @@ const sponsor = loadAccount(`${ROOT}/.local/burner-c.env`);
 const agent = loadAccount(`${ROOT}/.env.local`); // v2
 
 console.log("[sponsor]", sponsor.address.slice(0, 20) + "…");
-console.log("[agent]", agent.address.slice(0, 20) + "…");
+console.log("[agent] ", agent.address.slice(0, 20) + "…");
 
 const NEW_ARENA_CLASS = "0x72c7b997f3e71897104d9be470d9d7c4cafd08330dfd0617a38a5bfa2a0c54b";
 const ADAPTER_CLASS = "0x046da51ea1b9b2b311156503dff3812d1fafd1a8cf1408f0a477197eb47f86b0";
 const USD_TOKEN = "0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386";
-const UDC = "0x02ceed65a4bd731034c01113685c831b01c15d7d432f71afb1cf1634b53a2125";
-const TIP = "0x" + (20n * 10n ** 12n).toString(16);
+// Modest tip: large tips multiply against l2_gas max_amount inside account-balance validation
+// and can spuriously trip "resources exceed balance" (seen live: 2e13 tip × 6.3M gas > wallet).
+const TIP = "0x" + (1n * 10n ** 12n).toString(16);
 const MASK = (1n << 250n) - 1n;
 
-function serializeByteArray(value) {
-    const bytes = Buffer.from(value, "utf8");
-    const nFull = Math.floor(bytes.length / 31);
-    const data = [];
-    for (let i = 0; i < nFull; i++) data.push("0x" + bytes.subarray(i * 31, (i + 1) * 31).toString("hex"));
-    const rem = bytes.subarray(nFull * 31);
-    let pendingWord = "0x0", pendingLen = 0;
-    if (rem.length > 0) { pendingWord = "0x" + rem.toString("hex"); pendingLen = rem.length; }
-    return [data.length, ...data, pendingWord, pendingLen];
+// D016 fee path: raw starknet_estimateFee (named params), tight bounds — NOT SDK defaults,
+// whose generous padding trips account-balance validation on the agent wallet.
+async function tightBounds(account, calls) {
+    const nonce = await account.getNonce();
+    const txObj = {
+        type: "INVOKE", sender_address: account.address,
+        calldata: ["0x" + calls.length.toString(16),
+            ...calls.flatMap(c => [c.contractAddress,
+                "0x" + BigInt(typeof c.entrypoint === "string" && !c.entrypoint.startsWith("0x")
+                    ? hash.starknetKeccak(c.entrypoint) : c.entrypoint).toString(16),
+                "0x" + BigInt(c.calldata.length).toString(16),
+                ...c.calldata.map(v => "0x" + BigInt(v).toString(16))])],
+        signature: [], nonce: "0x" + BigInt(nonce).toString(16),
+        resource_bounds: { l2_gas: { max_amount: "0x0", max_price_per_unit: "0x0" }, l1_gas: { max_amount: "0x0", max_price_per_unit: "0x0" }, l1_data_gas: { max_amount: "0x0", max_price_per_unit: "0x0" } },
+        tip: TIP, paymaster_data: [], nonce_data_availability_mode: "L1", fee_data_availability_mode: "L1",
+        account_deployment_data: [], version: "0x100000000000000000000000000000003",
+    };
+    const body = { jsonrpc: "2.0", id: 1, method: "starknet_estimateFee", params: { request: [txObj], block_id: "latest", simulation_flags: ["SKIP_VALIDATE"] } };
+    const r = await fetch(RPC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    if (r.error) throw new Error("estimate: " + JSON.stringify(r.error).slice(0, 200));
+    const e = r.result[0];
+    return {
+        l2_gas: { max_amount: (BigInt(e.l2_gas_consumed) * 115n) / 100n + 10000n, max_price_per_unit: (BigInt(e.l2_gas_price) * 105n) / 100n },
+        l1_gas: { max_amount: (BigInt(e.l1_gas_consumed) * 115n) / 100n + 100n, max_price_per_unit: (BigInt(e.l1_gas_price) * 105n) / 100n },
+        l1_data_gas: { max_amount: (BigInt(e.l1_data_gas_consumed) * 115n) / 100n + 100n, max_price_per_unit: (BigInt(e.l1_data_gas_price) * 105n) / 100n },
+        estStrk: Number(BigInt(e.overall_fee)) / 1e18,
+    };
 }
+
+async function sendTx(account, opName, calls) {
+    const est = await tightBounds(account, calls);
+    const { estStrk, ...bounds } = est;
+    console.log(`[${opName}] submitting (~${estStrk.toFixed(4)} STRK est)...`);
+    const tx = await account.execute(calls, { resourceBounds: bounds, tip: TIP });
+    const rcpt = await provider.waitForTransaction(tx.transaction_hash);
+    if (rcpt.execution_status === "REVERTED") throw new Error(`${opName} reverted: ` + String(rcpt.revert_reason ?? "unknown").slice(0, 150));
+    const fee = rcpt.actual_fee ? Number(BigInt(rcpt.actual_fee.amount ?? rcpt.actual_fee)) / 1e18 : NaN;
+    console.log(`[${opName}] ✅ tx=${tx.transaction_hash.slice(0, 18)}… fee=${fee.toFixed(5)} STRK`);
+    return { tx, rcpt };
+}
+
 function canonicalize(v) {
     if (Array.isArray(v)) return `[${v.map(canonicalize).join(",")}]`;
     if (v && typeof v === "object") return `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonicalize(v[k])}`).join(",")}}`;
     return JSON.stringify(v);
 }
-
-async function estimateAndSubmit(account, opName, calls) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const nonce = await account.getNonce();
-            const txObj = {
-                type: "INVOKE", sender_address: account.address,
-                calldata: ["0x" + calls.length.toString(16),
-                    ...calls.flatMap(c => [c.contractAddress,
-                        "0x" + BigInt(typeof c.entrypoint === "string" && !c.entrypoint.startsWith("0x")
-                            ? hash.starknetKeccak(c.entrypoint) : c.entrypoint).toString(16),
-                        "0x" + BigInt(c.calldata.length).toString(16),
-                        ...c.calldata.map(v => "0x" + BigInt(v).toString(16))])],
-                signature: [], nonce: "0x" + BigInt(nonce).toString(16),
-                resource_bounds: { l2_gas:{max_amount:"0x0",max_price_per_unit:"0x0"},l1_gas:{max_amount:"0x0",max_price_per_unit:"0x0"},l1_data_gas:{max_amount:"0x0",max_price_per_unit:"0x0"} },
-                tip: TIP, paymaster_data:[], nonce_data_availability_mode:"L1", fee_data_availability_mode:"L1",
-                account_deployment_data:[], version:"0x100000000000000000000000000000003",
-            };
-            const body = { jsonrpc:"2.0",id:1,method:"starknet_estimateFee",params:{request:[txObj],block_id:"latest",simulation_flags:["SKIP_VALIDATE"]} };
-            const r = await fetch(RPC_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
-            if (r.error) throw new Error(JSON.stringify(r.error).slice(0,200));
-            const e = r.result[0];
-            const bounds = {
-                l2_gas: { max_amount: (BigInt(e.l2_gas_consumed)*115n)/100n+10000n, max_price_per_unit: (BigInt(e.l2_gas_price)*105n)/100n },
-                l1_gas: { max_amount: (BigInt(e.l1_gas_consumed)*115n)/100n+100n, max_price_per_unit: (BigInt(e.l1_gas_price)*105n)/100n },
-                l1_data_gas: { max_amount: (BigInt(e.l1_data_gas_consumed)*115n)/100n+100n, max_price_per_unit: (BigInt(e.l1_data_gas_price)*105n)/100n },
-            };
-            console.log(`[${opName}] submitting...`);
-            const tx = await account.execute(calls, { resourceBounds: bounds, tip: TIP });
-            const rcpt = await provider.waitForTransaction(tx.transaction_hash);
-            if (rcpt.execution_status === "REVERTED") throw new Error(rcpt.revert_reason?.slice(0,150));
-            console.log(`[${opName}] ✅`);
-            return tx;
-        } catch (err) {
-            if (/ALREADY/i.test(String(err))) { console.log(`[${opName}] already done`); return; }
-            console.log(`[${opName}] attempt ${attempt}: ${String(err).slice(0,120)}`);
-            if (attempt < 3) await new Promise(r => setTimeout(r, 8000));
-            else throw err;
-        }
-    }
+function sha240(obj) {
+    // Truncate to 240 bits: full 256-bit digests overflow felt252 ("felt overflow" gotcha).
+    return "0x" + createHash("sha256").update(canonicalize(obj)).digest("hex").slice(0, 60);
 }
 
 async function viewOn(addr, name, cd = []) {
     const sel = BigInt("0x" + hash.starknetKeccak(name).toString(16)) & MASK;
-    const body = { jsonrpc:"2.0",id:1,method:"starknet_call",params:[{contract_address:addr,entry_point_selector:"0x"+sel.toString(16),calldata:cd.map(v=>"0x"+BigInt(v).toString(16))},"latest"]};
-    const r = await fetch(RPC_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
-    if (r.error) throw new Error(name + ": " + JSON.stringify(r.error).slice(0,150));
+    const body = { jsonrpc: "2.0", id: 1, method: "starknet_call", params: [{ contract_address: addr, entry_point_selector: "0x" + sel.toString(16), calldata: cd.map(v => "0x" + BigInt(v).toString(16)) }, "latest"] };
+    const r = await fetch(RPC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+    if (r.error) throw new Error(name + ": " + JSON.stringify(r.error).slice(0, 150));
     return r.result;
 }
 
-// ── Get devnet block time for round timing ──
-const blkRes = await fetch(RPC_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"starknet_getBlockWithTxHashes",params:["latest"]})}).then(r=>r.json());
-const blockTime = Number(blkRes.result.timestamp);
-const startTime = BigInt(blockTime + 120);
-const endTime = startTime + 300n;
-const rulesCommitment = "0x" + createHash("sha256").update(canonicalize({
-    startTime: startTime.toString(), endTime: endTime.toString(),
-})).digest("hex").slice(0, 60); // truncate to 240 bits, safely within felt252
-
-console.log("\n[timing] start:", Number(startTime), "(+120s), end:", Number(endTime), "(+420s)");
-
-// ── Deploy Arena via UDC ──
-console.log("\n=== Deploying ===\n");
-const arenaConstructorCd = [
-    sponsor.address,
-    "0x" + startTime.toString(16),
-    "0x" + endTime.toString(16),
-    "0x3e8", // 1000 starting_units
-    "0xdac", // 3500 max_allocation_bps
-    "0x7d0", // 2000 max_drawdown_bps
-    "0x64", // 100 prize_cap_units
-    USD_TOKEN,
-    "0x1", USD_TOKEN,
-    "0x1", "0x123456789",
-    rulesCommitment,
-];
-const arenaSalt = "0x" + Math.floor(Date.now() / 1000).toString(16);
-const arenaDeployTx = await sponsor.execute([{
-    contractAddress: UDC, entrypoint: "deploy_contract",
-    calldata: [NEW_ARENA_CLASS, arenaSalt, "0x0", String(arenaConstructorCd.length), ...arenaConstructorCd],
-}], { tip: TIP });
-const arenaRcpt = await provider.waitForTransaction(arenaDeployTx.transaction_hash);
-if (arenaRcpt.execution_status === "REVERTED") throw new Error("Arena deploy reverted");
-let arenaAddr;
-for (const ev of (arenaRcpt.events ?? [])) {
-    if (ev.data && ev.data.length >= 1 && BigInt(ev.data[0]) !== 0n) { arenaAddr = ev.data[0]; break; }
+function assertEq(actual, expected, label) {
+    const a = Array.isArray(actual) ? actual[0] : actual;
+    const ok = BigInt(a) === BigInt(expected);
+    console.log(`[verify] ${label}: ${ok ? "✅" : "❌ got " + a}`);
+    if (!ok) throw new Error(`VERIFY FAIL: ${label} — expected ${expected}, got ${a}`);
 }
-console.log("[Arena]", arenaAddr);
-
-// Deploy Adapter
-const adapterCd = ["0x0", arenaAddr];
-const adapterSalt = "0x" + (Math.floor(Date.now() / 1000) + 1).toString(16);
-const adapterTx = await sponsor.execute([{
-    contractAddress: UDC, entrypoint: "deploy_contract",
-    calldata: [ADAPTER_CLASS, adapterSalt, "0x0", String(adapterCd.length), ...adapterCd],
-}], { tip: TIP });
-const adapterRcpt = await provider.waitForTransaction(adapterTx.transaction_hash);
-let adapterAddr;
-for (const ev of (adapterRcpt.events ?? [])) {
-    if (ev.data && ev.data.length >= 1 && BigInt(ev.data[0]) !== 0n) { adapterAddr = ev.data[0]; break; }
-}
-console.log("[Adapter]", adapterAddr);
-
-// ── Setup ──
-console.log("\n=== Setup ===\n");
-await estimateAndSubmit(sponsor, "setup", [
-    { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [sponsor.address, "100000", "0"] },
-    { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [agent.address, "50000", "0"] },
-    { contractAddress: arenaAddr, entrypoint: "set_action_adapter", calldata: [adapterAddr] },
-    { contractAddress: arenaAddr, entrypoint: "set_price", calldata: [USD_TOKEN, "1000000000000000000"] },
-]);
-
-// Verify setup
-const adapterSet = await viewOn(arenaAddr, "get_action_adapter");
-console.log("[verify] adapter set:", BigInt(adapterSet[0]) !== 0n ? "✅" : "❌ FAILED");
-
-// Register strategies (from agent wallet so registrant = agent)
-const tortoiseDesc = "Conservative compounder with small allocations and low drawdown";
-const tortoiseCommitment = "0x" + createHash("sha256").update(canonicalize({ describe: tortoiseDesc, alloc: 0.25 })).digest("hex").slice(0, 60);
-const falconDesc = "Aggressive momentum push with high allocation";
-const falconCommitment = "0x" + createHash("sha256").update(canonicalize({ describe: falconDesc, alloc: 0.35 })).digest("hex").slice(0, 60);
-
-await estimateAndSubmit(agent, "register:Tortoise", [{ contractAddress: arenaAddr, entrypoint: "register_strategy", calldata: [tortoiseCommitment] }]);
-const regT = await viewOn(arenaAddr, "get_registrant", [tortoiseCommitment]);
-console.log("[verify] Tortoise registrant:", BigInt(regT[0]) === BigInt(agent.address) ? "✅ agent" : "❌ mismatch");
-
-await estimateAndSubmit(agent, "register:Falcon", [{ contractAddress: arenaAddr, entrypoint: "register_strategy", calldata: [falconCommitment] }]);
-const regF = await viewOn(arenaAddr, "get_registrant", [falconCommitment]);
-console.log("[verify] Falcon registrant:", BigInt(regF[0]) === BigInt(agent.address) ? "✅ agent" : "❌ mismatch");
-
-// Deposit prize
-await estimateAndSubmit(sponsor, "approve_prize", [{ contractAddress: USD_TOKEN, entrypoint: "approve", calldata: [arenaAddr, "100", "0"] }]);
-await estimateAndSubmit(sponsor, "deposit_prize", [{ contractAddress: arenaAddr, entrypoint: "deposit_prize", calldata: ["100"] }]);
-const prize = await viewOn(arenaAddr, "get_prize_deposited");
-console.log("[verify] prize deposited:", Number(BigInt(prize[0])) === 100 ? "✅ 100 units" : "❌ " + prize[0]);
-
-// ── Wait for start ──
-const waitSec = Number(startTime) - Math.floor(Date.now() / 1000) + 5;
-if (waitSec > 0) { console.log(`\nwaiting ${waitSec}s for round start...`); await new Promise(r => setTimeout(r, waitSec * 1000)); }
-
-// ── Submit actions ──
-console.log("\n=== Agent Actions ===\n");
-await estimateAndSubmit(agent, "action:Tortoise", [{
-    contractAddress: arenaAddr, entrypoint: "open_submit_action",
-    calldata: ["0x746f72746f6973652d68303031", tortoiseCommitment, USD_TOKEN, "0x123456789",
-        "250", "1000", "1020", "0"],
-}]);
-const tCounts = await viewOn(arenaAddr, "get_action_counts", [tortoiseCommitment]);
-console.log("[verify] Tortoise actions accepted:", Number(tCounts[0]) === 1 ? "✅ 1" : "❌ " + tCounts[0]);
-
-await estimateAndSubmit(agent, "action:Falcon", [{
-    contractAddress: arenaAddr, entrypoint: "open_submit_action",
-    calldata: ["0x66616c636f6e2d68303031", falconCommitment, USD_TOKEN, "0x123456789",
-        "349", "1000", "1041", "0"],
-}]);
-const fCounts = await viewOn(arenaAddr, "get_action_counts", [falconCommitment]);
-console.log("[verify] Falcon actions accepted:", Number(fCounts[0]) === 1 ? "✅ 1" : "❌ " + fCounts[0]);
-
-// ── Wait for end, advance blocks, close & settle ──
-console.log("\n=== Close & Settle ===\n");
-const waitEnd = Number(endTime) - Math.floor(Date.now() / 1000) + 10;
-if (waitEnd > 0) { console.log(`waiting ${waitEnd}s for round end...`); await new Promise(r => setTimeout(r, waitEnd * 1000)); }
-
-// Advance blocks
-for (let i = 0; i < 3; i++) {
-    await estimateAndSubmit(sponsor, `advance-${i}`, [{ contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [sponsor.address, "1", "0"] }]);
+function deployedAddress(deployResult) {
+    const a = deployResult.contract_address ?? deployResult.address;
+    return Array.isArray(a) ? a[0] : a;
 }
 
-// Close
-await estimateAndSubmit(sponsor, "close", [{ contractAddress: arenaAddr, entrypoint: "close", calldata: [] }]);
+// ── Evidence accumulator (fail-closed) ──
+const evidence = {
+    network: "sepolia",
+    test: "honest round v2 (arena-address scoping fix)",
+    started_at: new Date().toISOString(),
+    arena_class_hash: NEW_ARENA_CLASS,
+    adapter_class_hash: ADAPTER_CLASS,
+    usd_token: USD_TOKEN,
+    sponsor: sponsor.address,
+    agent_wallet: agent.address,
+    wallets_note: "Both strategies registered AND operated from the agent wallet (single-wallet limitation, tracked as follow-up f-fix).",
+    steps: [],
+    status: "RUNNING",
+};
+function step(name, obj) { const s = { step: name, ...obj }; evidence.steps.push(s); return s; }
 
-const winnerResult = await viewOn(arenaAddr, "get_winner");
-const isFalcon = winnerResult[0] === falconCommitment;
-console.log("[winner]", isFalcon ? "FALCON ✅" : "TORTOISE ✅");
+const OUT_PATH = `${ROOT}/.local/open-round-evidence.json`;
+const PREV_PATH = `${ROOT}/.local/open-round-evidence.round1-flawed.json`;
+function writeEvidenceAtomic() {
+    const tmp = OUT_PATH + ".tmp";
+    writeFileSync(tmp, JSON.stringify(evidence, null, 2) + "\n");
+    renameSync(tmp, OUT_PATH);
+}
+function finish(exitCode) {
+    evidence.status = exitCode === 0 ? "VERIFIED" : "FAILED";
+    evidence.finished_at = new Date().toISOString();
+    // Archive the previous flawed run's evidence once, then overwrite with this run's result.
+    if (!existsSync(PREV_PATH)) { try { copyFileSync(OUT_PATH, PREV_PATH); } catch {} }
+    writeEvidenceAtomic();
+}
+let exitCode = 0;
+try {
+    process.exitCode = await runMain();
+} catch (err) {
+    exitCode = 1;
+    console.error("\n[ABORT]", String(err?.message ?? err).slice(0, 300));
+    evidence.error = String(err?.message ?? err).slice(0, 500);
+    finish(1);
+    process.exitCode = 1;
+}
 
-// Settle
-await estimateAndSubmit(sponsor, "settle", [{ contractAddress: arenaAddr, entrypoint: "settle", calldata: ["100"] }]);
-const settlement = await viewOn(arenaAddr, "get_settlement");
-console.log("[settlement] amount:", Number(BigInt(settlement[1])));
+async function runMain() {
+    // ── Round timing (fresh timestamps each run) ──
+    const blkRes = await fetch(RPC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "starknet_getBlockWithTxHashes", params: ["latest"] }) }).then(r => r.json());
+    const blockTime = Number(blkRes.result.timestamp);
+    const startTime = BigInt(blockTime + 420); // 7 min: deploy + setup + registrations must land BEFORE start
+    const endTime = startTime + 300n;
+    const rulesCommitment = sha240({ startTime: startTime.toString(), endTime: endTime.toString() });
+    console.log(`\n[timing] start: +420s, end: +720s | rules: ${rulesCommitment}`);
 
-console.log(`
+    // ═══ Deploy Arena + Adapter via SDK deployContract (address returned directly —
+    // no UDC event scraping, which is where the round-1 wrong-address bug lived) ═══
+    console.log("\n=== Deploying ===\n");
+    step("timing", { start_time: Number(startTime), end_time: Number(endTime), rules_commitment: rulesCommitment });
+
+    const arenaConstructorCd = [
+        sponsor.address,
+        startTime, endTime,
+        1000n,   // starting_units
+        3500n,   // max_allocation_bps
+        2000n,   // max_drawdown_bps
+        100n,    // prize_cap_units
+        USD_TOKEN,
+        1n, USD_TOKEN,      // initial_assets span
+        1n, "0x123456789",  // initial_targets span
+        rulesCommitment,
+    ];
+    const arenaDeployTx = await sponsor.deployContract(
+        { classHash: NEW_ARENA_CLASS, constructorCalldata: arenaConstructorCd.map(v => typeof v === "bigint" ? "0x" + v.toString(16) : v) },
+        { tip: TIP },
+    );
+    let arenaRcpt = await provider.waitForTransaction(arenaDeployTx.transaction_hash);
+    if (arenaRcpt.execution_status === "REVERTED") throw new Error("Arena deploy reverted: " + String(arenaRcpt.revert_reason).slice(0, 150));
+    // ONE canonical address for the entire run — every later call uses THIS constant.
+    const ARENA_ADDR = deployedAddress(arenaDeployTx);
+    console.log("[Arena]", ARENA_ADDR);
+    step("deploy_arena", { tx: arenaDeployTx.transaction_hash, arena: ARENA_ADDR });
+
+    const adapterTx = await sponsor.deployContract(
+        { classHash: ADAPTER_CLASS, constructorCalldata: ["0x0", ARENA_ADDR] },
+        { tip: TIP },
+    );
+    const adapterRcpt = await provider.waitForTransaction(adapterTx.transaction_hash);
+    if (adapterRcpt.execution_status === "REVERTED") throw new Error("Adapter deploy reverted");
+    const adapterAddr = deployedAddress(adapterTx);
+    console.log("[Adapter]", adapterAddr);
+    step("deploy_adapter", { tx: adapterTx.transaction_hash, adapter: adapterAddr });
+
+    // Liveness check on the exact address we will use for everything else.
+    assertEq(await viewOn(ARENA_ADDR, "get_action_adapter"), 0n, "Arena live & action_adapter unset pre-setup");
+
+    // ── Setup (sponsor): mint, bind adapter, set price ──
+    console.log("\n=== Setup ===\n");
+    const { tx: setupTx } = await sendTx(sponsor, "setup", [
+        { contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [agent.address, "50000", "0"] },
+        { contractAddress: ARENA_ADDR, entrypoint: "set_action_adapter", calldata: [adapterAddr] },
+        { contractAddress: ARENA_ADDR, entrypoint: "set_price", calldata: [USD_TOKEN, "1000000000000000000"] },
+    ]);
+    step("setup", { tx: setupTx.transaction_hash });
+
+    // Per HANDOFF: after setup → get_action_adapter ≠ 0 (read from THE arena)
+    assertEq(await viewOn(ARENA_ADDR, "get_action_adapter"), adapterAddr, "adapter bound on THE arena");
+    const priceTs = await viewOn(ARENA_ADDR, "get_price_timestamp", [USD_TOKEN]);
+    if (BigInt(priceTs[0]) === 0n) throw new Error("VERIFY FAIL: price timestamp zero");
+    console.log("[verify] USD price set @ ts", Number(priceTs[0]), "✅");
+
+    // ── Register both strategies FROM THE AGENT WALLET (registrant = agent) ──
+    console.log("\n=== Registration (agent wallet) ===\n");
+    const tortoiseDesc = "Conservative compounder with small allocations and low drawdown";
+    const falconDesc = "Aggressive momentum push with high allocation";
+    const tortoiseCommitment = sha240({ describe: tortoiseDesc, alloc: 0.25 });
+    const falconCommitment = sha240({ describe: falconDesc, alloc: 0.35 });
+    step("commitments", {
+        tortoise: { commitment: tortoiseCommitment, describe: tortoiseDesc },
+        falcon: { commitment: falconCommitment, describe: falconDesc },
+        derived_by: "sha256(canonicalJson) truncated to 240 bits",
+    });
+
+    async function registerStrategy(label, commitment, desc) {
+        const { tx } = await sendTx(agent, `register:${label}`, [{ contractAddress: ARENA_ADDR, entrypoint: "register_strategy", calldata: [commitment] }]);
+        // Per HANDOFF: after register → get_registrant(commitment) == submitter, ON THE SAME arena.
+        assertEq(await viewOn(ARENA_ADDR, "get_registrant", [commitment]), agent.address, `${label} registrant == agent`);
+        step(`register_${label.toLowerCase()}`, { tx: tx.transaction_hash, commitment, registrant: agent.address });
+    }
+    await registerStrategy("Tortoise", tortoiseCommitment, tortoiseDesc);
+    await registerStrategy("Falcon", falconCommitment, falconDesc);
+
+    // ── Prize escrow (sponsor) ──
+    console.log("\n=== Prize ===\n");
+    const { tx: apprTx } = await sendTx(sponsor, "approve_prize", [{ contractAddress: USD_TOKEN, entrypoint: "approve", calldata: [ARENA_ADDR, "100", "0"] }]);
+    const { tx: depTx } = await sendTx(sponsor, "deposit_prize", [{ contractAddress: ARENA_ADDR, entrypoint: "deposit_prize", calldata: ["100"] }]);
+    assertEq(await viewOn(ARENA_ADDR, "get_prize_deposited"), 100n, "prize deposited == 100");
+    step("prize_escrow", { approve_tx: apprTx.transaction_hash, deposit_tx: depTx.transaction_hash, amount: 100 });
+
+    // ── Wait for round start, then submit actions ──
+    const waitSec = Number(startTime) - Math.floor(Date.now() / 1000) + 5;
+    if (waitSec > 0) { console.log(`\nwaiting ${waitSec}s for round start...`); await new Promise(r => setTimeout(r, waitSec * 1000)); }
+
+    console.log("\n=== Agent Actions ===\n");
+    // open_submit_action(receipt_id, strategy_commitment, asset, target, allocation_units,
+    //                    portfolio_value_before, portfolio_value_after, drawdown_bps)
+    // NOTE: the contract REJECTS (not reverts) when allocation > value; accepted requires
+    // allocation_units <= portfolio_value_before. Tortoise 250/1000 → accepted.
+    async function submitAction(label, receiptIdHex, commitment, allocUnits, afterVal, ddBps) {
+        const { tx, rcpt } = await sendTx(agent, `action:${label}`, [{
+            contractAddress: ARENA_ADDR, entrypoint: "open_submit_action",
+            calldata: [receiptIdHex, commitment, USD_TOKEN, "0x123456789", String(allocUnits), "1000", String(afterVal), String(ddBps)],
+        }]);
+        // Parse ActionSubmitted events from THIS tx to see the contract's internal verdict.
+        // Raw RPC layout: keys=[event_selector, receipt_id, strategy_commitment], data=[accepted]
+        const evs = (rcpt.events ?? []).filter(e =>
+            BigInt(e.from_address) === BigInt(ARENA_ADDR)
+            && e.keys.length === 3 && e.data.length >= 1
+            && BigInt(e.keys[2]) === BigInt(commitment));
+        let accepted = null;
+        for (const e of evs) {
+            try { accepted = BigInt(e.data[0]) === 1n; } catch {}
+        }
+        console.log(`[${label}] contract verdict: ${accepted === null ? "NO EVENT FOUND" : accepted ? "ACCEPTED" : "REJECTED"}`);
+        // Per HANDOFF: after each action → get_action_counts incremented ON THE SAME arenaAddr.
+        const counts = await viewOn(ARENA_ADDR, "get_action_counts", [commitment]);
+        const acc = Number(counts[0]), rej = Number(counts[1]);
+        console.log(`[verify] ${label} action counts on THE arena: accepted=${acc} rejected=${rej}`);
+        return { label, tx: tx.transaction_hash, receipt_id: receiptIdHex, verdict: accepted === null ? "NO_EVENT" : accepted ? "ACCEPTED" : "REJECTED", accepted, accepted_count: acc, rejected_count: rej };
+    }
+
+    const tRes = await submitAction("Tortoise", "0x746f72746f6973652d68303032", tortoiseCommitment, 250, 1020, 0);
+    if (!(tRes.accepted === true && tRes.accepted_count === 1)) {
+        throw new Error(`FAIL-CLOSED: Tortoise action not accepted on-chain (verdict=${tRes.verdict}, counts=${tRes.accepted_count}/${tRes.rejected_count})`);
+    }
+    step("tortoise_action", { ...tRes, allocation_units: 250, before: 1000, after: 1020, drawdown_bps: 0 });
+
+    const fRes = await submitAction("Falcon", "0x66616c636f6e2d68303032", falconCommitment, 349, 1041, 0);
+    if (!(fRes.accepted === true && fRes.accepted_count === 1)) {
+        throw new Error(`FAIL-CLOSED: Falcon action not accepted on-chain (verdict=${fRes.verdict}, counts=${fRes.accepted_count}/${fRes.rejected_count}) — abort before close so a bad demo can never be presented as success`);
+    }
+    step("falcon_action", { ...fRes, allocation_units: 349, before: 1000, after: 1041, drawdown_bps: 0 });
+
+    // ── Wait for end, advance blocks, close & settle ──
+    console.log("\n=== Close & Settle ===\n");
+    const waitEnd = Number(endTime) - Math.floor(Date.now() / 1000) + 10;
+    if (waitEnd > 0) { console.log(`waiting ${waitEnd}s for round end...`); await new Promise(r => setTimeout(r, waitEnd * 1000)); }
+
+    // Advance blocks (Sepolia timestamps freeze without txs).
+    for (let i = 0; i < 2; i++) {
+        await sendTx(sponsor, `advance-${i}`, [{ contractAddress: USD_TOKEN, entrypoint: "mint", calldata: [sponsor.address, "1", "0"] }]);
+    }
+    step("advance_blocks", { mints: 2 });
+
+    const { tx: closeTx } = await sendTx(sponsor, "close", [{ contractAddress: ARENA_ADDR, entrypoint: "close", calldata: [] }]);
+    step("close", { tx: closeTx.transaction_hash });
+
+    const winnerResult = await viewOn(ARENA_ADDR, "get_winner");
+    const winnerCommitment = winnerResult[0];
+    const winnerName = winnerCommitment === falconCommitment ? "FALCON" : winnerCommitment === tortoiseCommitment ? "TORTOISE" : `UNKNOWN(${winnerCommitment})`;
+    console.log("[winner]", winnerName, winnerCommitment);
+
+    const { tx: settleTx } = await sendTx(sponsor, "settle", [{ contractAddress: ARENA_ADDR, entrypoint: "settle", calldata: ["100"] }]);
+    const settlement = await viewOn(ARENA_ADDR, "get_settlement");
+    assertEq(settlement[0], winnerCommitment, "settled winner == derived winner");
+    assertEq(settlement[1], 100n, "settled amount == 100");
+    step("settle", { tx: settleTx.transaction_hash, winner: winnerName, amount: Number(BigInt(settlement[1])) });
+
+    // Final independent cross-checks against chain state (the whole point of this fix).
+    const finalCountsT = await viewOn(ARENA_ADDR, "get_action_counts", [tortoiseCommitment]);
+    const finalCountsF = await viewOn(ARENA_ADDR, "get_action_counts", [falconCommitment]);
+    evidence.final_state = {
+        arena: ARENA_ADDR,
+        adapter: adapterAddr,
+        rules_commitment_onchain: (await viewOn(ARENA_ADDR, "rules_commitment"))[0],
+        tortoise_accepted: Number(finalCountsT[0]),
+        falcon_accepted: Number(finalCountsF[0]),
+        winner: winnerName,
+        settlement_amount: Number(BigInt(settlement[1])),
+    };
+
+    console.log(`
 ════════════════════════════════════════
-  open_submit_action VERIFIED ON SEPOLIA
-  
-  Arena:     ${arenaAddr}
-  Winner:    ${isFalcon ? "FALCON" : "TORTOISE"}
-  Prize:     100 units TestUSD
-  
-  Both strategies committed before round.
-  Both actions submitted on-chain.
-  Every step verified against contract state.
+  HONEST ROUND v2 — ALL STEPS CHAIN-VERIFIED
+
+  Arena:   ${ARENA_ADDR}
+  Winner:  ${winnerName} (derived on-chain, settled)
+  Tortoise accepted actions: ${finalCountsT[0]}
+  Falcon   accepted actions: ${finalCountsF[0]}
+  Every step verified via view calls on THE SAME arena.
 ════════════════════════════════════════`);
+
+    finish(0);
+    console.log("\n[evidence] written:", OUT_PATH);
+    return 0;
+}

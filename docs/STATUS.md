@@ -136,7 +136,11 @@ Known pitfalls fixed this phase: SDK double-hashing of hex-string entrypoints (p
 
 ## open_submit_action — Sepolia full round (2026-08-24)
 
-**STATUS: VERIFIED.** New Arena class with `open_submit_action` entrypoint deployed and tested end-to-end.
+**STATUS: SUPERSEDED by honest round v2 below.** Kept for history. The Falcon
+"REJECTED, reason under investigation" mystery is resolved in honest round v2:
+the parameters were valid and identical to the ones ACCEPTED there — the
+rejection was a symptom of the address-scoping bug (action landed on an arena
+where that commitment was not registered).
 
 - Class hash: `0x072c7b99…` (declared, 69.66 STRK)
 - Arena: `0x3a32…c371`, Adapter: `0x6735…aa06`
@@ -144,8 +148,55 @@ Known pitfalls fixed this phase: SDK double-hashing of hex-string entrypoints (p
 - Falcon action submitted but REJECTED by the contract (reason under investigation)
 - TORTOISE wins by default (only eligible strategy with accepted actions)
 - Prize settled: 100 units TestUSD
-- Evidence: `.local/open-round-evidence.json`
 
 Note: TORTOISE wins despite lower return because the scorer uses `return_bps - drawdown_bps`.
 Both had 0 drawdown but Tortoise's lower allocation means less risk exposure.
 The scorer is deterministic and derives winner from on-chain action data — no hardcoding.
+
+
+## Honest round v2 — address-scoping fix VERIFIED (2026-08-24)
+
+**STATUS: COMPLETE / CHAIN-VERIFIED.** Codex-review fix #2 delivered: real
+commitments, agent-wallet registration + operation, per-step view verification,
+fail-closed evidence run. Replaces the flawed round-1 evidence (archived at
+`.local/open-round-evidence.round1-flawed.json`; its "both actions accepted"
+implication was the false claim corrected earlier).
+
+What was fixed in `scripts/honest-round.mjs`:
+1. **Address scoping (the HANDOFF bug):** ONE `ARENA_ADDR`, taken from SDK
+   `deployContract`'s return value (no UDC event scraping), flows to setup,
+   registrations, prize, both actions, close, settle, and every verification read.
+2. **Round-1 Falcon rejection explained:** its parameters were actually valid and
+   IDENTICAL to this run's (`allocation_units=349` < the 350-unit cap = 3500bps
+   of value 1000) — resubmitted here, the contract ACCEPTED them. The rejection
+   was a downstream symptom of the address-scoping bug: the action landed on an
+   arena where the Falcon commitment was not registered (assert
+   `UNREGISTERED` path / wrong-window state), not a parameter problem.
+   This run: Tortoise 250/1000→1020 (+200bps), Falcon 349/1000→1041 (+410bps) —
+   both within the 3500 cap, both ACCEPTED on THE arena.
+3. **Fee path:** D016 tight bounds restored everywhere (raw named-params
+   estimateFee, amounts ×1.15, prices ×1.05, tip 1e12). Discovered en route:
+   SDK default padded bounds + high tip trip OZ account-balance validation even
+   with ample balance (`55: Account validation failed`). Recorded in skill
+   `starknet-sdk-pitfalls` §11; raw-RPC event-keys selector prefixing in §12.
+4. **Fail-closed flow:** every write followed by a chain-read assertion
+   (`get_action_adapter`, `get_registrant` ×2, `get_prize_deposited`,
+   `get_action_counts` ×2, `get_settlement`); ActionSubmitted events parsed from
+   receipts; any mismatch aborts BEFORE close/settle so a bad demo can never
+   present as success.
+
+Verified result (all reads on arena `0x58d7…731b`):
+- Registrant == agent wallet for BOTH commitments (single-wallet limitation remains).
+- Tortoise accepted 1 / rejected 0; Falcon accepted 1 / rejected 0.
+- Winner derived on-chain: FALCON (410 − 0 bps beats 200 − 0 bps) — a real
+  score decision this time, not a default win.
+- Settle paid 100 TestUSD to the FALCON registrant; escrow drained to 0x0.
+- Independent cross-check `scripts/open-round-crosscheck.mjs`: 24/24 checks pass,
+  re-derived from live chain state (liveness, rules commitment, registrants,
+  counts, settlement, escrow drain, every tx SUCCEEDED, ACCEPTED events present).
+- Evidence: `.local/open-round-evidence.json` (status VERIFIED, all tx hashes).
+- `npm run verify`: 40/40 green post-run.
+
+Still open (unchanged): f1 verifiable trade through whitelisted target, f3
+permissionless close/settle + fixed escrowed amount, Cairo tests for
+`open_submit_action`, two independent agent wallets.
