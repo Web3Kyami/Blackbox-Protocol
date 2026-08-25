@@ -332,3 +332,38 @@ will pick them up. Remaining from review: prize-unit narrative fix (docs/scripts
 B′ spec implementation, genuine adapter-execution round v5, dashboard public-RPC mode,
 fuzz/adversarial tests before external audit. Full review: /tmp/codex-review-final.md
 (copied to docs/REVIEWS/codex-2026-08-25.md).
+
+## Honest round v5 — adapter-mediated + P1 declarations VERIFIED (Aug 25, 2026)
+
+**STATUS: COMPLETE / CHAIN-VERIFIED.** Closes HANDOFF items 1-3: P1-fixed class declared, adapter-mediated round, extended crosscheck with overflow-safety.
+
+**Declares on Sepolia:**
+- Arena class `0x6dac5b7ca4e958c05b44c9b690f3c870deac60e819848bf555ebd65219d35de` (P1 fixes: saturating scoring, max_strategies cap, CEI settle, rules freeze)
+- Adapter class `0x418dbc37b4315c0841f20bdb473145990ff57d89a701a2c1f55688b022500bc` (ArenaAdapterV2 per-pool custody, transfer_from pull, permissioned withdraw)
+
+**Round v5 result (evidence `.local/open-round-evidence.json`, status VERIFIED):**
+- Arena `0x520fe2667f3eec818faed8603a77c2f042abd5a3fb31f20e8471cf59f334083`, Adapter `0x4b9c57d184dc1dfe0b25ccfd6ccde9c5ab515d9d32c95858e5340d76ac301ae`
+- Setup: adapter bound + price set (1e18) + 2 registrations (independent wallets) + prize escrow 100
+- Actions: BOTH through adapter contract-context (Arena saw caller == bound adapter):
+  - Tortoise `tortoise-h005` 20 units -> ACCEPTED, custody 20e18 raw pulled via transfer_from, per-pool recorded
+  - Falcon `falcon-h005` 5 units -> ACCEPTED, custody 5e18 raw pulled, per-pool recorded
+- Liveness: close by Tortoise (non-sponsor) `0x7576fdb21b987822...`, settle by Falcon (non-sponsor) `0x24834244699b9441...` — permissionless f3 verified via tx sender
+- Winner: FALCON recomputed on-chain (return -50 bps - 50 drawdown = -100 vs Tortoise -400) -> settled 100, escrow drained to 0
+- Withdraws: both pools reclaimed exact raw from adapter custody via `withdraw()` (per-pool isolation proven, custody 0 post-withdraw)
+
+**Crosscheck `scripts/open-round-crosscheck.mjs` — EXTENDED & PASSED (exit 0, 40+ assertions):**
+- Arena liveness, rules commitment, registrants (distinct wallets), action counts (1/1 each)
+- Adapter binding: arena.get_action_adapter() == deployed adapter == mediated_by per action; adapter code present
+- Custody math: allocation_units * price == claimed raw; adapter.get_custody(pool, receipt) == 0 after withdraw + asset == USD token
+- Transfer_from pull verification: Transfer event from pool to adapter for exact raw amount on each submit tx
+- Winner recomputation, settlement == min(deposited, cap), prize drained, get_winner == settlement, float restored
+- Every tx hash SUCCEEDED, every submit emitted arena event for commitment
+- Overflow-safety spot checks: get_score readable (no panic), u128::MAX saturates at I64_MAX, 0 -> -10000, close liveness preserved, adapter still bound post-close
+- `npm run verify`: 40/40 green post-run
+
+**Fixes applied along the way:**
+- honest-round-v5.mjs: RAW wei handling (removed double-scale allocRaw bug, verified via 20/5 unit pulls), custody per-pool view, fail-closed verification per step
+- crosscheck: Transfer selector filtering (separate Approval vs Transfer), v5/v4 dual-mode, saturating logic tests
+
+Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/adversarial tests before external audit, prize-unit docs (raw vs whole units).
+
