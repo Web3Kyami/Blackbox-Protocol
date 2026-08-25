@@ -1,52 +1,33 @@
-# HANDOFF — Next Task: value-axis design DECISION (doc ready, awaiting Kyami)
-
-**Decision doc:** `docs/VALUE-AXIS-OPTIONS.md` — options A/B/C compared, **B
-(attested float) recommended**. Nothing further builds until Kyami picks.
-After approval, execution order: B's contract changes + tests → glibc scarb
-suite green → declare (~40 STRK, request approval) → honest round v5 →
-extended crosscheck → docs.
+# HANDOFF — Next Task: honest round v5 on the fixed class (declare + adapter-mediated)
 
 ## Read first (in order)
 1. `AGENTS.md` (root) — engineering rules
-2. `docs/VALUE-AXIS-OPTIONS.md` — THE pending decision
-3. `docs/STATUS.md` — "Honest round v4" section is current truth
-3. Skills: `web3/blackbox-arena`, `web3/starknet-sdk-pitfalls`, `web3/onchain-verify-not-logs`
-4. `contracts/src/arena.cairo` (scorer + escrow) and `packages/strategy-adapter` semantics
+2. `docs/STATUS.md` — "Codex external review + Pile-1 fixes" section
+3. `docs/REVIEWS/codex-2026-08-25.md` — the independent review driving this
 
 ## Context
-Sepolia rehearsal is DONE and fully verified: honest round v4 ran end-to-end on
-class `0xf170ef4c…b9bd7` with contract-observed escrowed allocations, permissionless
-close/settle/refund; crosscheck exit 0 proves three-way agreement
-(script claim == chain replay == contract-stored escrow).
+Pile-1 contract defects from the codex review are FIXED in source (commit 06580da):
+panic-free saturating scoring, `max_strategies` registration cap, CEI settle,
+rules freeze. 53/53 tests green. The fixes exist only as source — no new class
+has been declared on Sepolia yet.
 
-The LAST trust hole: **portfolio values are strategy-reported.** Escrowed
-allocations are contract-enforced, but `current_value` (which drives scoring via
-the adapter path) is still whatever the strategist reports through the adapter.
-On mainnet this must not stand — a lying strategist could win a prize.
+## Next task (exact steps)
+1. Declare the fixed Arena class on Sepolia (~40 STRK — ASK KYAMI BEFORE SPENDING).
+   Record the new class hash in STATUS.md.
+2. Run an **adapter-mediated** honest round v5 against it (`scripts/honest-round.mjs`
+   already passes `max_strategies=64`): trades must flow through the action adapter,
+   not raw transfers to a sink — this closes codex's "dummy sink" criticism of v4.
+3. Extend `scripts/open-round-crosscheck.mjs`: assert winner/refund/prize math AND
+   that every action's execution evidence is adapter-emitted, plus overflow-safety
+   spot checks (submit u128::MAX portfolio value pre-close; round must still close).
+4. Update STATUS.md with v5 results; rewrite this file for the next task.
 
-## Task: pick + spec the enforcement mechanism for the value axis
-Compare, decide, and write a one-page design doc (`docs/DESIGN-value-axis.md`)
-covering at minimum:
-1. **Oracle-fed prices** (Pragma/Chainlink-style feed): Arena reads asset price,
-   computes portfolio value from escrowed allocations + reported cash balance.
-   Cash balance remains reported unless also escrowed — state residual risk.
-2. **Pool-share accounting** (e.g. Vesu/Ekubo shares as the escrowed asset):
-   value = shares × pricePerShare read from pool — removes price oracle but adds
-   venue risk.
-3. **Full custody vault**: all strategy funds live in Arena-owned vault; values
-   are pure contract arithmetic — strongest, changes product shape.
-Recommend ONE for mainnet MVP, list invariants it upholds/breaks, sketch Cairo
-changes (which functions/storage), Sepolia test plan, and cost estimate.
-NO implementation in this task — decision doc only.
+## Proof of completion
+- New class hash declared (view call: `core::starknet::class_hash::get_contract_class_hash` equivalent via RPC).
+- Round v5 settled; crosscheck exit 0 with adapter-evidence assertions.
+- Every write confirmed per-tx by receipt + event parsing (never logs alone).
 
-## Definition of done
-- `docs/DESIGN-value-axis.md` exists with the 3 options compared + explicit
-  recommendation + residual-trust-holes section.
-- `docs/STATUS.md` updated to reference the decision.
-- Kyami's approval on the chosen mechanism before any implementation begins.
-
-## After this (queue)
-(b) external security review of arena.cairo (custody!) → (c) dashboard off
-devnet-session (`app.mjs` L580 hardcodes 127.0.0.1:4174) onto public RPC →
-(d) mainnet ops: funded sponsor wallet, monitoring, fee budget (§14 pitfalls:
-tip×gas counted in balance validation; declare ≈39 STRK actual).
+## Invariants to respect
+- No mainnet value movement without Kyami's explicit approval (RED).
+- Sepolia STRK spend >~50 needs approval first.
+- On-chain writes verified via receipts/events + view functions, never logs alone.

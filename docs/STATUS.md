@@ -316,3 +316,19 @@ Sepolia rehearsal is functionally complete. Remaining before mainnet:
 (strategy-reported values remain the trust hole); (b) external security review
 of arena.cairo (now holds custody); (c) dashboard off devnet-session onto public
 RPC; (d) ops: funded mainnet sponsor wallet, monitoring, fee budget per §14.
+
+## Codex external review + Pile-1 fixes — COMPLETE (Aug 25, commit 06580da)
+Independent codex CLI review of the repo + value-axis doc produced a ranked
+findings list; the contract-defect pile is now fixed and regression-tested:
+- CRIT close-DoS via unchecked u128→i128→i64 scoring unwraps → saturating
+  u256-magnitude bps conversion (`portfolio_return_bps`); huge values win, never panic.
+- HIGH unbounded registration griefing O(n) winner loop → `max_strategies` cap (REG_FULL).
+- HIGH CEI violation in settle() → all settlement state written before token transfer;
+  new `reentrancy_observer_token` proves settled-state visible mid-payout.
+- Rules freeze: add_allowed_asset/target locked post-start.
+53/53 snforge tests green. Deploy paths updated (max_strategies=64). NOTE: these
+fixes are in source only — NOT yet declared/deployed on Sepolia; next declare (~40 STRK)
+will pick them up. Remaining from review: prize-unit narrative fix (docs/scripts),
+B′ spec implementation, genuine adapter-execution round v5, dashboard public-RPC mode,
+fuzz/adversarial tests before external audit. Full review: /tmp/codex-review-final.md
+(copied to docs/REVIEWS/codex-2026-08-25.md).
