@@ -179,6 +179,7 @@ async function runMain() {
         1n, USD_TOKEN,      // initial_assets span
         1n, TRADE_TARGET,   // initial_targets span
         rulesCommitment,
+        64n,    // max_strategies (P1: bounded registration, winner loop stays in-gas)
     ];
     const arenaDeployTx = await sponsor.deployContract(
         { classHash: NEW_ARENA_CLASS, constructorCalldata: arenaConstructorCd.map(v => typeof v === "bigint" ? "0x" + v.toString(16) : v) },

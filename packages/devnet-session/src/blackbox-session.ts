@@ -253,6 +253,7 @@ export async function setupBlackboxSession(options?: {
       1n, // initial_targets: Span<ContractAddress> serialized as [len, elem...]
       MOCK_TARGET,
       BigInt(rulesCommitmentHex),
+      64n, // max_strategies (P1: bounded registration)
     ],
     "0x800",
   );

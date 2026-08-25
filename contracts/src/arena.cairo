@@ -84,7 +84,9 @@ pub trait IArena<TState> {
     ) -> felt252;
     // f1 contract-side: escrowed action — the Arena pulls allocation_units × price
     // from the registrant and verifies its OWN balance delta (contract-observed
-    // allocation, no caller trust). Value update derives from the observed escrow.
+    // allocation, no caller trust). Scope note: escrows enforce the bonded
+    // ALLOCATION only; portfolio value remains strategy-reported (see
+    // docs/VALUE-AXIS-OPTIONS.md for the contract-measured roadmap).
     fn open_submit_action_escrowed(
         ref self: TState,
         receipt_id: felt252,
@@ -117,6 +119,33 @@ pub mod Arena {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use super::{IArena, IPrizeTokenDispatcher, IPrizeTokenDispatcherTrait, ScoreEntry, StrategyState, reason};
 
+    // P1-critical: caller-supplied portfolio values must NEVER be able to panic
+    // scoring. Computed magnitude-first in u256 so no intermediate can overflow.
+    const I64_MAG_CAP: u256 = 0x7fffffffffffffff_u256; // 2^63 - 1
+
+    fn clamped_return_bps(final_value: u128, starting_units: u128) -> i64 {
+        let negative = final_value < starting_units;
+        // Both branches are ordered subtractions — no underflow possible.
+        let diff: u256 = if negative {
+            (starting_units - final_value).into()
+        } else {
+            (final_value - starting_units).into()
+        };
+        // bps magnitude = diff × 10000 / starting (starting >= 1 by constructor);
+        // worst case ≈ 2^128 × 10^4 fits u256 comfortably.
+        let mag: u256 = (diff * 10000_u256) / starting_units.into();
+        let mag = if mag > I64_MAG_CAP { I64_MAG_CAP } else { mag };
+        // Safe by construction: mag <= 2^63 - 1, so high limb is zero and the
+        // u128 -> i128 -> i64 chain cannot fail (both TryIntos exist in core).
+        let mag_i128: i128 = mag.low.try_into().unwrap();
+        let magnitude: i64 = mag_i128.try_into().unwrap();
+        if negative {
+            -magnitude
+        } else {
+            magnitude
+        }
+    }
+
     pub mod errors {
         pub const ONLY_SPONSOR: felt252 = 'ONLY_SPONSOR';
         pub const ONLY_ADAPTER: felt252 = 'ONLY_ADAPTER';
@@ -146,6 +175,7 @@ pub mod Arena {
         pub const ALLOCATION_EXCEEDED: felt252 = 'ALLOC_EXCEED';
         pub const AMOUNT_MISMATCH: felt252 = 'AMT_MISMATCH';
         pub const NO_ESCROW: felt252 = 'NO_ESCROW';
+        pub const REGISTRATION_FULL: felt252 = 'REG_FULL';
     }
 
     #[storage]
@@ -171,6 +201,9 @@ pub mod Arena {
         settlement_amount: u128,
         prize_token: ContractAddress,
         prize_deposited: u128,
+        // P1: hard liveness cap on registration (winner loop is O(n); unbounded
+        // registration let a Sybil grief close/settle past Starknet step limits).
+        max_strategies: u32,
         registration_count: u32,
         commitments: Map<u32, felt252>,
         strategies: Map<felt252, StrategyState>,
@@ -305,12 +338,15 @@ pub mod Arena {
         initial_assets: Span<ContractAddress>,
         initial_targets: Span<ContractAddress>,
         rules_commitment: felt252,
+        max_strategies: u32,
     ) {
         assert(start_time < end_time, errors::BAD_TIME);
         assert(starting_units.is_non_zero(), errors::BAD_RULES);
         assert(max_allocation_bps.is_non_zero() && max_allocation_bps <= 10000, errors::BAD_RULES);
         assert(max_drawdown_bps <= 10000, errors::BAD_RULES);
         assert(prize_token.is_non_zero(), errors::BAD_RULES);
+        // P1: registration cap must be nonzero (0 would make every round unwinnable).
+        assert(max_strategies.is_non_zero(), errors::BAD_RULES);
         self.sponsor.write(sponsor);
         self.action_adapter.write(Zero::zero());
         self.start_time.write(start_time);
@@ -320,6 +356,7 @@ pub mod Arena {
         self.max_drawdown_bps.write(max_drawdown_bps);
         self.prize_cap_units.write(prize_cap_units);
         self.prize_token.write(prize_token);
+        self.max_strategies.write(max_strategies);
         let mut assets = initial_assets;
         let mut i: usize = 0;
         while i < assets.len() {
@@ -353,6 +390,8 @@ pub mod Arena {
 
         fn add_allowed_asset(ref self: ContractState, asset: ContractAddress) {
             assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            // P1 (rules freeze): whitelist is immutable once the round starts.
+            assert(get_block_timestamp() < self.start_time.read(), errors::BAD_TIME);
             assert(!self.allowed_assets.read(asset), errors::DUPLICATE_ASSET);
             self.allowed_assets.write(asset, true);
             self.asset_count.write(self.asset_count.read() + 1);
@@ -361,6 +400,8 @@ pub mod Arena {
 
         fn add_allowed_target(ref self: ContractState, target: ContractAddress) {
             assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            // P1 (rules freeze): whitelist is immutable once the round starts.
+            assert(get_block_timestamp() < self.start_time.read(), errors::BAD_TIME);
             assert(!self.allowed_targets.read(target), errors::DUPLICATE_TARGET);
             self.allowed_targets.write(target, true);
             self.target_count.write(self.target_count.read() + 1);
@@ -401,6 +442,12 @@ pub mod Arena {
             assert(get_block_timestamp() < self.start_time.read(), errors::REGISTRATION_CLOSED);
             let existing = self.strategies.read(commitment);
             assert(!existing.registered, errors::DUPLICATE_STRATEGY);
+            // P1: bounded registration — the winner loop is O(n), so an unbounded
+            // field let a Sybil grief close()/settle() past Starknet step limits.
+            assert(
+                self.registration_count.read() < self.max_strategies.read(),
+                errors::REGISTRATION_FULL,
+            );
             let order = self.registration_count.read() + 1;
             self.registration_count.write(order);
             self.commitments.write(order, commitment);
@@ -485,10 +532,11 @@ pub mod Arena {
             result
         }
 
+        // f3: permissionless after end_time — closing is an inevitable state
+        // transition. P1: liveness is enforced by construction (registration is
+        // bounded; scoring converts saturatingly and cannot panic on any stored
+        // value). Anyone may finalize the arena.
         fn close(ref self: ContractState) {
-            // f3: permissionless after end_time — closing is an inevitable state
-            // transition with no griefing vector (actions already blocked past end;
-            // winner derivation is deterministic). Anyone may finalize the arena.
             assert(get_block_timestamp() >= self.end_time.read(), errors::BAD_TIME);
             assert(!self.closed.read(), errors::ALREADY_CLOSED);
             self.closed.write(true);
@@ -662,6 +710,8 @@ pub mod Arena {
             // f3: permissionless after close — anyone may trigger settlement.
             assert(self.closed.read(), errors::NOT_CLOSED);
             assert(!self.settled.read(), errors::ALREADY_SETTLED);
+            let winner = self.get_winner();
+            let recipient = self.strategies.read(winner).registrant;
             // Exact structural payout: everything deposited up to the cap. No
             // caller-supplied amount → the sponsor cannot underpay the winner.
             let mut amount_units = self.prize_deposited.read();
@@ -669,8 +719,12 @@ pub mod Arena {
             if amount_units > cap {
                 amount_units = cap;
             };
-            let winner = self.get_winner();
-            let recipient = self.strategies.read(winner).registrant;
+            // P1 (CEI): persist ALL settlement state BEFORE the external token
+            // transfer. If the token reenters, it observes a settled arena; if
+            // the transfer fails, everything reverts atomically anyway.
+            self.settled.write(true);
+            self.settlement_winner.write(winner);
+            self.settlement_amount.write(amount_units);
             assert(recipient.is_non_zero(), errors::PRIZE_NO_REGISTRANT);
             assert(amount_units.is_non_zero(), errors::INSUFFICIENT_PRIZE);
             let token = IPrizeTokenDispatcher { contract_address: self.prize_token.read() };
@@ -678,9 +732,6 @@ pub mod Arena {
             assert(balance >= amount_units.into(), errors::INSUFFICIENT_PRIZE);
             let transferred = token.transfer(recipient, amount_units.into());
             assert(transferred, errors::PRIZE_TRANSFER_FAILED);
-            self.settled.write(true);
-            self.settlement_winner.write(winner);
-            self.settlement_amount.write(amount_units);
             self.emit(PrizePaid { winner_commitment: winner, recipient, amount: amount_units });
             winner
         }
@@ -691,10 +742,9 @@ pub mod Arena {
 
         fn get_score(self: @ContractState, commitment: felt252) -> ScoreEntry {
             let strategy = self.strategies.read(commitment);
-            let starting: i128 = self.starting_units.read().try_into().unwrap();
-            let final_value: i128 = strategy.current_value.try_into().unwrap();
-            let return_bps_i128 = ((final_value - starting) * 10000) / starting;
-            let return_bps: i64 = return_bps_i128.try_into().unwrap();
+            // P1-critical: saturating conversion — attacker-controlled values can
+            // no longer panic scoring (close() DoS eliminated).
+            let return_bps = clamped_return_bps(strategy.current_value, self.starting_units.read());
             let eligible = strategy.registered && strategy.max_drawdown_bps <= self.max_drawdown_bps.read();
             let score_bps = if eligible { return_bps - strategy.max_drawdown_bps.into() } else { 0 };
             ScoreEntry {

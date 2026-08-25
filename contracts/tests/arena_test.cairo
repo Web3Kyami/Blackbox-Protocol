@@ -4,6 +4,9 @@ use blackbox_arena_contracts::arena::{
 use blackbox_arena_contracts::mock_prize_token::{
     IMockPrizeTokenDispatcher, IMockPrizeTokenDispatcherTrait,
 };
+use blackbox_arena_contracts::reentrancy_observer_token::{
+    IReentrancyObserverTokenDispatcher, IReentrancyObserverTokenDispatcherTrait,
+};
 use core::num::traits::Zero;
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
@@ -44,6 +47,7 @@ fn deploy_arena_raw_with_prize(prize: ContractAddress) -> (ContractAddress, IAre
                 1.into(),
                 TARGET.into(),
                 'RULES_V1',
+                64_u32.into(), // max_strategies (P1 registration cap)
             ],
         )
         .unwrap_syscall();
@@ -183,9 +187,28 @@ fn test_add_allowed_asset_and_target() {
     arena.add_allowed_asset(ASSET2);
     arena.add_allowed_target(TARGET2);
     stop_cheat_caller_address(address);
-
     assert!(arena.is_asset_allowed(ASSET2));
     assert!(arena.is_target_allowed(TARGET2));
+}
+
+// P1 (rules freeze): whitelists are immutable once the round starts — the
+// sponsor cannot add venues/assets mid-round.
+#[test]
+#[should_panic(expected: ('BAD_TIME',))]
+fn test_add_asset_after_start_panics() {
+    let (address, arena) = deploy_arena_raw();
+    start_cheat_block_timestamp(address, START);
+    start_cheat_caller_address(address, AMARA);
+    arena.add_allowed_asset(ASSET2);
+}
+
+#[test]
+#[should_panic(expected: ('BAD_TIME',))]
+fn test_add_target_after_start_panics() {
+    let (address, arena) = deploy_arena_raw();
+    start_cheat_block_timestamp(address, START);
+    start_cheat_caller_address(address, AMARA);
+    arena.add_allowed_target(TARGET2);
 }
 
 #[test]
@@ -377,6 +400,150 @@ fn test_integer_return_basis_points_truncation() {
 
     let score = arena.get_score(FALCON);
     assert_eq!(score.return_bps, 30);
+}
+
+// P1-critical regression: an attacker-supplied portfolio_value_after above
+// i128::MAX (and one that overflows the ×10000 scaling) used to panic scoring
+// inside get_winner(), permanently bricking close()/settle() for everyone.
+// Scoring must now saturate instead — and a huge value must WIN, not revert.
+#[test]
+fn test_extreme_portfolio_values_do_not_panic_scoring() {
+    let (address, arena) = deploy_arena();
+    arena.register_strategy(TORTOISE);
+    arena.register_strategy(FALCON);
+
+    start_cheat_block_timestamp(address, START + 1);
+    // u128::MAX cannot be represented as i128; the old unwrap chain panicked here.
+    assert_eq!(
+        submit(address, arena, 'R_BIG', TORTOISE, 100, 1_000, 340_282_366_920_938_463_463_374_607_431_768_211_455_u128, 0),
+        reason::ACCEPTED
+    );
+    // Also overflows the old i128 multiply by 10000 during bps scaling.
+    assert_eq!(
+        submit(address, arena, 'R_OVF', FALCON, 100, 1_000, 170_141_183_460_469_231_731_687_303_715_884_105_728_u128, 0),
+        reason::ACCEPTED
+    );
+    stop_cheat_block_timestamp(address);
+
+    // Both scores computed without panicking; the max-value strategy is ahead
+    // (saturated at i64::MAX bps) and close() derives a winner deterministically.
+    let tortoise_score = arena.get_score(TORTOISE);
+    let falcon_score = arena.get_score(FALCON);
+    assert_eq!(tortoise_score.return_bps, 9223372036854775807_i64);
+    assert!(falcon_score.return_bps > 0);
+
+    start_cheat_block_timestamp(address, END);
+    start_cheat_caller_address(address, OTHER); // permissionless close
+    arena.close();
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    assert_eq!(arena.get_winner(), TORTOISE);
+}
+
+// P1-high: registration is now bounded so the O(n) winner loop cannot be
+// griefed past Starknet's step limits by a Sybil field. The Nth+1 registration
+// must revert with REG_FULL.
+#[test]
+fn test_registration_cap_enforced() {
+    let token = deploy_prize_token();
+    let class = declare("Arena").unwrap_syscall().contract_class();
+    let (address, _) = class
+        .deploy(
+            @array![
+                AMARA.into(),
+                START.into(),
+                END.into(),
+                1_000_u128.into(),
+                3_500_u16.into(),
+                2_000_u16.into(),
+                100_u128.into(),
+                token.contract_address.into(),
+                1.into(),
+                ASSET.into(),
+                1.into(),
+                TARGET.into(),
+                'RULES_V1',
+                2_u32.into(), // tiny cap on purpose
+            ],
+        )
+        .unwrap_syscall();
+    let arena = IArenaDispatcher { contract_address: address };
+
+    // Cap of 2 admits exactly two registrations.
+    arena.register_strategy(TORTOISE);
+    arena.register_strategy(FALCON);
+    start_cheat_caller_address(address, OTHER);
+    stop_cheat_caller_address(address);
+}
+
+#[test]
+#[should_panic(expected: ('REG_FULL',))]
+fn test_registration_cap_third_reverts() {
+    let token = deploy_prize_token();
+    let class = declare("Arena").unwrap_syscall().contract_class();
+    let (address, _) = class
+        .deploy(
+            @array![
+                AMARA.into(),
+                START.into(),
+                END.into(),
+                1_000_u128.into(),
+                3_500_u16.into(),
+                2_000_u16.into(),
+                100_u128.into(),
+                token.contract_address.into(),
+                1.into(),
+                ASSET.into(),
+                1.into(),
+                TARGET.into(),
+                'RULES_V1',
+                2_u32.into(), // tiny cap on purpose
+            ],
+        )
+        .unwrap_syscall();
+    let arena = IArenaDispatcher { contract_address: address };
+
+    arena.register_strategy(TORTOISE);
+    arena.register_strategy(FALCON);
+    start_cheat_caller_address(address, OTHER);
+    arena.register_strategy(PULSE); // must revert: cap is 2
+}
+
+// P1-medium (CEI): settle() must persist settlement state BEFORE calling out to
+// the prize token. A token observing the Arena mid-transfer must already see it
+// settled (nonzero settlement amount), proving effects-before-interactions.
+#[test]
+fn test_settle_writes_state_before_external_transfer() {
+    let (token_address, _) = declare("ReentrancyObserverToken")
+        .unwrap_syscall()
+        .contract_class()
+        .deploy(@array![])
+        .unwrap_syscall();
+    let token = IReentrancyObserverTokenDispatcher { contract_address: token_address };
+    let (address, arena) = deploy_arena_raw_with_prize(token_address);
+
+    token.mint(AMARA.into(), 500_u256);
+    // Approve must run AS AMARA against the token (cheatcode targets the token
+    // contract), so the allowance lands on (AMARA -> Arena).
+    start_cheat_caller_address(token_address, AMARA);
+    token.approve(address, 1_000_000_u256); // Arena must be able to pull the prize
+    stop_cheat_caller_address(token_address);
+    start_cheat_caller_address(address, AMARA);
+    arena.deposit_prize(100);
+    stop_cheat_caller_address(address);
+
+    arena.register_strategy(FALCON);
+
+    start_cheat_block_timestamp(address, END);
+    start_cheat_caller_address(address, AMARA);
+    arena.close();
+    let winner = arena.settle();
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+
+    assert_eq!(winner, FALCON);
+    // The token saw a fully settled arena DURING the payout transfer.
+    assert!(token.observed_settled_during_payout());
 }
 
 #[test]
