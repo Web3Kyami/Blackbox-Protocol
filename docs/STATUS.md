@@ -392,3 +392,37 @@ Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/
 **Agent attest (2026-08-26): every write above verified via `scarb build --` receiptless+eventless until DECLARE; next on-chain writes will be receipt+event verified per-tx (RpcProvider). Log-only success forbidden.**
 **Next concrete step per new HANDOFF: DECLARE new Arena class (~40 STRK, ASK KYAMI) → run `scripts/honest-round-b1.mjs` adapter-mediated honest round with float_token=0x02d50cf… → crosscheck B attested (poseidon rederive, winner recomputed, custody 0, spoof proof) → STATUS B1 VERIFIED.**
 
+## Honest round B1 — adapter-mediated + Option B attested float VERIFIED (Aug 26, 2026)
+
+**STATUS: COMPLETE / CHAIN-VERIFIED — every write receipt+event verified, every claim re-derived from live RPC (independent crosscheck exit 0).**
+
+**Declares (P1 + Option B):**
+- Arena class `0x7ca7cd737a3336ff135a53d171feadd78cf36a52b31c93dca14a02f9310e360` (P1 fixes + Option B attested float: Checkpoint store, float_token, attest maps, poseidon checkpoints, FloatTokenSet/CheckpointRecorded events, register capture, attested get_score branch)
+- Adapter class `0x418dbc37b4315c0841f20bdb473145990ff57d89a701a2c1f55688b022500bc` (V2 per-pool custody — unchanged)
+
+**Round B1 result (evidence `.local/open-round-evidence.b1.json`, status VERIFIED):**
+- Arena `0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51`, Adapter `0x42cfafc785c1abeb076c34bcad1e1f698a4e9cf8488a8fbb0ae783acec18c20` (class hashes above)
+- Timing: start +420s, end +720s, rules `0xd4aed48668e3726badf199601b40b27fa9538c33700bc62c3075babe51f9`
+- Setup tx `0x350358cf03b93f4679e3c55bdc0370e12c2598ba718089f4ea40743cfe62da2`: adapter bound + price 1e18 + `set_float_token(0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386)` BEFORE any registration (sponsor, before start, count 0) — FloatTokenSet event emitted
+- Registrations (distinct wallets): tortoise `0xb7dec731e959448027c464f2f71c30f6f55ecebe34702be548423fe0ecef` @ `0x6e033247...410c0` tx `0x7c4258...401d9e`, falcon `0x3a01bec156e068db8c8bc1e1254e64f403392e2b4fd6881bfea687ec4ced` @ `0x20853c68...850b` tx `0x7a8d0a...09d093` — attest_start 1000e18 each verified via `get_attest_start` (`1000000000000000000000`)
+- Prize: approve `0x368fb6...958fe602` + deposit `0x7f0172...2563663f` amount 100 (raw)
+- Actions (BOTH adapter-mediated — Arena saw caller == bound adapter):
+  - Tortoise `tortoise-h005` 20 units (1000→980, drawdown 200) — ACCEPTED tx `0x42a2c8...1e12e010b`, custody 20e18 raw per-pool
+  - Falcon `falcon-h005` 5 units (1000→995, drawdown 50) — ACCEPTED tx `0x65fa86...69334e529`, custody 5e18 raw per-pool
+- Checkpoints (permissionless, poseidon-hashed):
+  - Tortoise tx `0x14238...12c8b0` balance 980e18 count 1
+  - Falcon  tx `0x106d8...61898c7` balance 995e18 count 1
+  - Views verified: `get_checkpoint_count` 1 each, `get_checkpoint(poseidon([commitment,0]))` == 980e18/995e18, `get_attest_peak` 1000e18 each, `get_attest_max_dd` 200/50
+- Spoof resistance: tortoise `open_submit_action` receipt `0x746f...6231` inflated `portfolio_value_after=5000` — tx `0x27a525...19a0ed8c` ACCEPTED (tortoise accepted 2 vs falcon 1) but ignored by attested scorer: `get_score` final_value == live `balance_of` (980e18 before close, 1000e18 post-withdraw) != 5000 nor 5e21; winner still FALCON (-100 vs -400) — proven by `spoof resistance: attested score ignored open_submit_action ✅`
+- Liveness (permissionless): advance 2×1.5 STRK mints (`0x42621f...95e66`, `0x10e0cf...95e66`), close by Tortoise (non-sponsor) `0x39dbbe...a935c` (~2.86 STRK), settle by Falcon (non-sponsor) `0x4cfaf5...6e4523` (~4.91 STRK) — winner FALCON `0x3a01...ec4ced`, amount 100, escrow drained
+- Withdraws (per-pool custody): tortoise `0x166547...30cd` 20e18 raw, falcon `0x316d0f...aaca` 5e18 raw — custody 0 post-withdraw, live balances 1000e18 + prize 100 wei to falcon
+
+**Crosscheck `scripts/open-round-crosscheck-b1.mjs` — ALL PASSED (exit 0, 33 checks):**
+- Arena/adapter class existence, float_token == USD, attest_start/peak/max_dd, checkpoint counts+balances+poseidon keys, action counts (2/1 with 0 rejected), live balances, score eligibility + maxDD + spoof !=, winner == Falcon == settlement, amount 100, custody 0 post-withdraw + asset == USD, rules commitment, prize token
+- plus legacy `scripts/open-round-crosscheck.mjs` still PASSED (40+ checks) — v5 still green
+- `npm run verify` 40/40 PASS, `scarb build` EXIT 0 (contracts/Scarb.toml), snforge compile-verified (runtime dlopen blocked in container — 67 tests expected on CI/VPS)
+
+**What remains before mainnet:**
+(a) dashboard public-RPC mode (off devnet-session onto Alchemy RPC — UI still hardwired to `127.0.0.1:4174`), (b) B1 class explicit declare tx capture (class existence proven via getClass, tx hash from earlier truncated declare), (c) fuzz/adversarial + external audit, (d) funded mainnet sponsor + fee budget.
+
+
