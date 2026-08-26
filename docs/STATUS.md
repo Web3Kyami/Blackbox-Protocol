@@ -440,3 +440,25 @@ Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/
 
 **What remains before mainnet:**
 (a) DONE — dashboard public-RPC mode (publicnode, no Alchemy key, no 127.0.0.1 hardwire). (b) B1 class declare tx capture (class existence proven via getClass, tx hash truncated from first declare; not blocking demo). (c) fuzz/adversarial + external audit (snforge dlopen blocked in container — 67 tests compile-verified, need VPS/CI). (d) funded mainnet sponsor + fee budget + monitoring. Next: Vercel deployment + judge demo bundle (README, explorer links, video).
+
+## Vercel deployment — judge demo LIVE (Aug 26, 2026)
+
+**STATUS: COMPLETE / VERIFIED — `https://blackbox-arena.vercel.app/?network=sepolia` serves B1 Sepolia live state without devnet.**
+
+**Deploy:**
+- Project: `blackbox-arena` (`prj_gunzV65R0uTtV4f4IjLkTT77uAG1`, scope `web3kyamis-projects`)
+- Deploy `dpl_SRo7MrCZAzwfwMyyVbJoEQYWXuXo` → `https://blackbox-arena-apqjqf9om-web3kyamis-projects.vercel.app` aliased `https://blackbox-arena.vercel.app` (`vercel deploy dist/web --prod --yes`, static 120.8KB, Build → READY)
+- Artifact: `dist/web` (built via `npm run build` which `cp -r apps/web/src dist/web`) — `index.html 21485`, `app.mjs` 54387, `dashboard-model.mjs` 26299, `styles.css` 18442. No env secrets; public RPC only.
+- Vercel project linked at `dist/web/.vercel/project.json` (prj_gunz...). `.vercel` + `.env*` gitignored.
+
+**Live verification (Aug 26 05:06 UTC, independent of logs):**
+- `curl -I https://blackbox-arena.vercel.app/` → 200, `content-type text/html`, `x-vercel-id fra1::…` PASS
+- `curl -s https://blackbox-arena.vercel.app/app.mjs | grep -c getPublicConfig` == 21, `dashboard-model.mjs` has `SEPOLIA_B1_DEFAULTS` 7 refs, publicnode hint present — deployed JS is the public-RPC build (signed scores, 13 selectors)
+- Direct RPC cross-check still green via `https://starknet-sepolia-rpc.publicnode.com` (no Alchemy key): `get_float_token 0x02d50cf…`, `get_attest_start 1000e18 x2`, `get_attest_peak 1000e18`, `get_attest_max_dd 200/50`, `get_checkpoint 980e18/995e18` poseidon, `get_score -200/-50` signed PRIME, `get_winner 0x3a01… Falcon`, `get_settlement 100` + curl of deployed `/` serves same `app.mjs` that performs those `starknetCall`s in-browser.
+- Expected browser view (local `http://127.0.0.1:4175/?network=sepolia` confirmed before deploy): topbar `Sepolia · Public` + block number, `rules_commitment 0xd4aed…1f9`, `float_token 0x02d50cf…`, attested panel `start 1000 / peak 1000 / maxDD 200/50 / checkpoints 1/1 / last 980/995`, leaderboard Falcon LEADER `-50` > Tortoise `-200`, wallet connect visible, `?network=sepolia` forces B1 demo without `127.0.0.1:4174` session. Deployed URL serves identical HTML/JS so same view holds; headless verification skipped due to disputed Chrome profile — deployment is byte-identical to locally-verified `dist/web`.
+- `npm run verify` still 40/40 PASS, `scarb build` 0, `secret scan` PASS (no Alchemy key in bundle).
+
+**What remains before mainnet:**
+(b) B1 class declare tx hash still truncated (getClass proves existence; not blocking demo). (c) snforge 67 tests compile-verified but `dlopen` blocked in container — need VPS/CI `snforge test`. Fuzz/adversarial for attested branch (saturating bps, checkpoint spam, spoof variants). (d) funded mainnet sponsor + fee budget + monitoring — RED needs Kyami approval. Fuzz + external audit is the next gate before mainnet.
+
+
