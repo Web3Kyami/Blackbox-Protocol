@@ -462,3 +462,25 @@ Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/
 (b) B1 class declare tx hash still truncated (getClass proves existence; not blocking demo). (c) snforge 67 tests compile-verified but `dlopen` blocked in container — need VPS/CI `snforge test`. Fuzz/adversarial for attested branch (saturating bps, checkpoint spam, spoof variants). (d) funded mainnet sponsor + fee budget + monitoring — RED needs Kyami approval. Fuzz + external audit is the next gate before mainnet.
 
 
+
+## Fuzz + snforge adversarial hardening + contracts freeze VERIFIED (Aug 26, 2026)
+
+**STATUS: COMPLETE / VERIFIED — 92 snforge tests green (fuzz included), contracts frozen for audit.**
+
+**What changed:**
+- New file `contracts/tests/fuzz_adversarial.cairo` (16 tests, 437 lines): saturating bps fuzz (u128::MAX, zero-start, extremes), allocation-cap fuzz, checkpoint spam (20 sequential checkpoints + poseidon uniqueness for indices 0/1/2), spoof-ignored 10× repetition, escrow-vs-attested isolation, attested effective_peak = max(start, peak_stored, current) branch, bad-float/after-start/double-set/zero-address/no-float/unregistered/after-close reverts, high!=0→MAX saturation. All PASS.
+- Toolchain fix: container now has `~/.local/scarb-gnu` glibc Scarb 2.17.0 that can `dlopen` proc macros. `~/.local/scarb-gnu/scarb test` → **92 passed / 0 failed** (seed 9431325249556317828, log `/tmp/snforge-2026-08-26.log`). This is 53 P1 + 14 B + new 16 fuzz + adapter_v2/regression. Previously container musl scarb was blocked; now green locally without VPS.
+- `npm run verify` still **40/40 PASS**, `scarb build` 0 errors (only E2066 LegacyMap deprecation — cosmetic), `secret scan PASS`.
+- Freeze manifest: `.verification/contracts-freeze-2026-08-26.sha256` (sha256 of all `contracts/src/*.cairo` + `Scarb.toml` at HEAD 956126c). Any contract edit invalidates freeze.
+- Audit brief: `docs/AUDIT-BRIEF.md` — scope (arena + adapter_v2 + mocks), deployed B1 evidence, trust holes (single float, off-float wealth, adapter custodial, no oracle, LegacyMap), cross-check instructions, invariants, and what to verify locally. Ready to send to reviewers.
+
+**Verification on this commit (956126c + new test file, no contract source change):**
+- `~/.local/scarb-gnu/scarb test` 92/92 PASS, fuzzer seeds logged
+- `npm run verify` 40/40 PASS, `~/.local/scarb-gnu/scarb build` EXIT 0
+- `sha256sum contracts/src/*.cairo contracts/Scarb.toml` matches freeze manifest
+- B1 crosschecks still green: `scripts/open-round-crosscheck-b1.mjs` 33/33, `scripts/open-round-crosscheck.mjs` 40+ checks, live publicnode reads (float_token, attest, checkpoints, scores −200/−50, winner Falcon, settlement 100)
+
+**What remains before mainnet:**
+- External audit: send `docs/AUDIT-BRIEF.md` + freeze manifest to reviewers; collect findings.
+- Ops (RED — needs Kyami explicit approval, DO NOT spend): funded mainnet sponsor wallet + fee budget (~40 STRK declare + 10 STRK round + Already-Declared tolerance) + monitoring + `Class Hash Already Declared` handling. Plan only until approved.
+
