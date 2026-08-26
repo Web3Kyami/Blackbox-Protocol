@@ -24,7 +24,7 @@ export const escapeHtml = (value) =>
       })[character] || character,
   );
 
-// Exact Cairo IArena Entrypoint Selectors (starknet_keccak)
+// Exact Cairo IArena Entrypoint Selectors (starknet_keccak) - must match compiled class 0x7ca7cd...10e360 (P1+Option B)
 export const SELECTORS = {
   get_score:
     "0x009b2a59dab9794f9f1895ff5b5b621d7ad138084313beeb963003e9ca8ae684",
@@ -33,13 +33,40 @@ export const SELECTORS = {
   rules_commitment:
     "0x0324ca8d3e029e2b353752b2033cb595e001cc9f8b3b0b9c5428daee38d0f9a8",
   get_winner:
-    "0x018b1447953cb7c05001ff5579979b9777f9859f7d0a6c6e7f2275fc80f9bb46",
+    "0x0336ff46ef133890122ceba9cea282f1e4cf395392ce11e16672a6d486d6e9d1",
   get_settlement:
-    "0x00a747978ec45be8a9b3d0cbb5776a394aa51db93952f446ce46eebe7ce47b67",
+    "0x014d1aef6dfc39d7de75450df09b9d204dee404e099f01b193599c1fee3c5191",
   register_strategy:
     "0x02b11a95b0d38a29a1668ea57dfc75c3542370a67a8f0ebd183ec754e382ae83",
   get_registrant:
     "0x0127243b8992bc823fb86e1ebe48bd6a48da9973e630e55f563210ce03759c6c",
+  // Option B attested float (P1+ attested scoring)
+  get_float_token:
+    "0x006b654b8cbc6a9892ecc3c32627d51f769918acf3d0ed005eddb502746b4f6a",
+  get_attest_start:
+    "0x036624c066c1b350a8cfca1bcebbdf51ac578ba3eee2bd8ead3b1bacef6aeb40",
+  get_attest_peak:
+    "0x00f4f23bab52236385d47a3b1701d809a7f4def8703bd78302a0c64538ef87b4",
+  get_attest_max_dd:
+    "0x012fd1267f78d42c902d2bc29455fda4aaa7df150a8be072e527277465600277",
+  get_checkpoint_count:
+    "0x006a477ce59a238f2051e0f929374bb7f3845cbd838a0dbac0feadff021a4dc0",
+  get_checkpoint:
+    "0x0041f5e6f76ee763c8e9adfcff7aca58b8c6cbad53ca1b9b000e3afa3885034f",
+  get_action_counts:
+    "0x005d9fd602e891b97e1cdaa71024991c62b05d1907e4cb8a4531f8805696a205",
+  get_prize_token:
+    "0x009b858ab225744a871bbc74820536cb0651c37013a91a1c57d172251f30ecc7",
+  get_prize_deposited:
+    "0x01f5d01d8d4b63664d974566cf2f00a5202971a5dca39c69578473096ebc0bdc",
+  get_custody:
+    "0x0153814673b7ff8e6ba62ca95a05b2da7e16656ae9c4880b49dcb321ae09690e",
+  open_submit_action:
+    "0x00472c953c8498ff14a56ad93404baa6500f1bdfc7dac33f62fbe593ba7eaf1f",
+  set_float_token:
+    "0x00b28bf57f052e729557cba8a330a78fc33f41a007c6ca98b783ece6b4105ca5",
+  checkpoint:
+    "0x0301d8d5f36bc5356cc801e43d2c4e4b360682ecbe538a8c576ec1a7d775975e",
 };
 
 // Known Strategy Commitments on Devnet
@@ -93,10 +120,15 @@ export function parseScoreEntry(jsonResult, strategy) {
 
   try {
     const finalValue = Number(BigInt(result[1]));
-    const returnBps = Number(BigInt(result[2]));
+    const _prime = (1n << 251n) + 17n * (1n << 192n) + 1n;
+    const toSigned = (hex) => {
+      const v = BigInt(hex);
+      return v > _prime / 2n ? Number(v - _prime) : Number(v);
+    };
+    const returnBps = toSigned(result[2]);
     const maxDdBps = Number(BigInt(result[3]));
     const eligible = result[4] === "0x1" || result[4] === "0x01";
-    const scoreBps = Number(BigInt(result[5]));
+    const scoreBps = toSigned(result[5]);
     const regOrder = Number(BigInt(result[6]));
 
     return {
@@ -206,8 +238,7 @@ export function renderLeaderboardHtml(scores) {
       const isWinner =
         index === 0 &&
         entry.eligible &&
-        entry.scoreBps !== null &&
-        entry.scoreBps > 0;
+        entry.scoreBps !== null;
       return renderScoreRowHtml(entry, index, isWinner);
     })
     .join("\n");
@@ -476,5 +507,189 @@ export function buildEvidenceExportPayload(receipts, meta) {
     rulesCommitment: meta?.rulesCommitment ?? null,
     receipts: Array.isArray(receipts) ? receipts : [],
   };
+}
+
+// ── Public-RPC Mode (Sepolia / Mainnet rehearsal) ───────────────────────────
+
+export const SEPOLIA_B1_DEFAULTS = {
+  arenaAddress: "0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51",
+  adapterAddress: "0x42cfafc785c1abeb076c34bcad1e1f698a4e9cf8488a8fbb0ae783acec18c20",
+  usdToken: "0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386",
+  network: "sepolia",
+  rpcHint: "https://starknet-sepolia-rpc.publicnode.com",
+  proxyPath: "/api/rpc",
+};
+
+export const SEPOLIA_B1_STRATEGIES = [
+  { label: "Tortoise (B1)", commitment: "0xb7dec731e959448027c464f2f71c30f6f55ecebe34702be548423fe0ecef" },
+  { label: "Falcon (B1)", commitment: "0x3a01bec156e068db8c8bc1e1254e64f403392e2b4fd6881bfea687ec4ced" },
+];
+
+function parseSingleFeltResult(jsonResult) {
+  if (!jsonResult || typeof jsonResult !== "object" || jsonResult.error) return null;
+  const r = jsonResult.result;
+  if (!Array.isArray(r) || r.length < 1) return null;
+  try {
+    return BigInt(r[0]);
+  } catch {
+    return null;
+  }
+}
+
+export function parseFloatTokenResult(jsonResult) {
+  const v = parseSingleFeltResult(jsonResult);
+  if (v === null) return { ok: false, error: "Failed to read float_token" };
+  if (v === 0n) return { ok: false, error: "float_token not set" };
+  return { ok: true, token: "0x" + v.toString(16) };
+}
+
+export function parseAttestStartResult(jsonResult) {
+  if (!jsonResult || typeof jsonResult !== "object" || jsonResult.error)
+    return { ok: false, error: jsonResult?.error?.message || "attest_start read failed" };
+  const r = jsonResult.result;
+  if (!Array.isArray(r) || r.length < 1) return { ok: false, error: "Invalid attest_start shape" };
+  try {
+    const lo = BigInt(r[0]);
+    const hi = r.length >= 2 ? BigInt(r[1]) : 0n;
+    const raw = lo + (hi << 128n);
+    return { ok: true, raw, rawHex: "0x" + raw.toString(16) };
+  } catch {
+    return { ok: false, error: "Failed to parse attest_start" };
+  }
+}
+
+export function parseAttestPeakResult(jsonResult) {
+  return parseAttestStartResult(jsonResult);
+}
+
+export function parseAttestMaxDdResult(jsonResult) {
+  const v = parseSingleFeltResult(jsonResult);
+  if (v === null) return { ok: false, error: "Failed to read max_dd" };
+  try {
+    return { ok: true, bps: Number(v) };
+  } catch {
+    return { ok: false, error: "Invalid max_dd" };
+  }
+}
+
+export function parseCheckpointCountResult(jsonResult) {
+  const v = parseSingleFeltResult(jsonResult);
+  if (v === null) return { ok: false, error: "Failed to read checkpoint count" };
+  try {
+    return { ok: true, count: Number(v) };
+  } catch {
+    return { ok: false, error: "Invalid count" };
+  }
+}
+
+export function parseCheckpointResult(jsonResult) {
+  if (!jsonResult || typeof jsonResult !== "object" || jsonResult.error)
+    return { ok: false, error: jsonResult?.error?.message || "checkpoint read failed" };
+  const r = jsonResult.result;
+  if (!Array.isArray(r) || r.length < 2) return { ok: false, error: "Invalid checkpoint shape" };
+  try {
+    let lo, hi, ts;
+    if (r.length === 2) {
+      lo = BigInt(r[0]);
+      hi = 0n;
+      ts = Number(BigInt(r[1]));
+    } else {
+      lo = BigInt(r[0]);
+      hi = BigInt(r[1]);
+      ts = Number(BigInt(r[2]));
+    }
+    const raw = lo + (hi << 128n);
+    return { ok: true, balanceRaw: raw, balanceHex: "0x" + raw.toString(16), timestamp: ts };
+  } catch {
+    return { ok: false, error: "Failed to parse checkpoint" };
+  }
+}
+
+export function parseActionCountsResult(jsonResult) {
+  if (!jsonResult || typeof jsonResult !== "object" || jsonResult.error)
+    return { ok: false, error: jsonResult?.error?.message || "action_counts read failed" };
+  const r = jsonResult.result;
+  if (!Array.isArray(r) || r.length < 2) return { ok: false, error: "Invalid action_counts shape" };
+  try {
+    return { ok: true, accepted: Number(BigInt(r[0])), rejected: Number(BigInt(r[1])) };
+  } catch {
+    return { ok: false, error: "Failed to parse action_counts" };
+  }
+}
+
+export function formatUnits18(raw) {
+  try {
+    const v = typeof raw === "bigint" ? raw : BigInt(raw);
+    const divisor = 10n ** 18n;
+    const whole = v / divisor;
+    const frac = v % divisor;
+    if (frac === 0n) return whole.toString();
+    const fracStr = frac.toString().padStart(18, "0").replace(/0+$/, "");
+    return `${whole}.${fracStr}`;
+  } catch {
+    return String(raw);
+  }
+}
+
+export function resolvePublicRpcConfig({ searchParams, storage, hostname } = {}) {
+  const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
+  const get = (k) => params.get(k);
+  const lsGet = (k) => {
+    try {
+      return storage ? storage.getItem(k) : null;
+    } catch {
+      return null;
+    }
+  };
+  const rpcUrl = get("rpcUrl") || lsGet("bb:rpcUrl") || "";
+  const arenaAddress = get("arena") || get("arenaAddress") || lsGet("bb:arenaAddress") || "";
+  const adapterAddress = get("adapter") || lsGet("bb:adapterAddress") || "";
+  const network = (get("network") || lsGet("bb:network") || "").toLowerCase();
+  const forcePublic = get("public") === "1" || network === "sepolia" || network === "mainnet";
+  const hasPublicConfig = Boolean(rpcUrl || arenaAddress || forcePublic);
+  // Default to B1 Sepolia demo when public requested but no explicit arena
+  const resolvedNetwork = network || (hasPublicConfig ? SEPOLIA_B1_DEFAULTS.network : "devnet");
+  const resolvedArena = arenaAddress || (hasPublicConfig ? SEPOLIA_B1_DEFAULTS.arenaAddress : "");
+  const resolvedAdapter = adapterAddress || (hasPublicConfig && resolvedArena === SEPOLIA_B1_DEFAULTS.arenaAddress ? SEPOLIA_B1_DEFAULTS.adapterAddress : "");
+  const mainnetHint = "https://starknet-mainnet-rpc.publicnode.com";
+  const fallbackHint = resolvedNetwork === "mainnet" ? mainnetHint : SEPOLIA_B1_DEFAULTS.rpcHint;
+  const resolvedRpc = rpcUrl || (hasPublicConfig ? fallbackHint : "");
+  return {
+    mode: hasPublicConfig ? "public" : "devnet",
+    rpcUrl: resolvedRpc,
+    arenaAddress: resolvedArena,
+    adapterAddress: resolvedAdapter,
+    network: resolvedNetwork,
+    forcePublic,
+    hasPublicConfig,
+  };
+}
+
+export function renderAttestedFloatHtml(entries) {
+  if (!entries || entries.length === 0) {
+    return `<div class="loading-placeholder">No attested float snapshots. Strategies must register and checkpoint on-chain.</div>`;
+  }
+  return entries
+    .map((e) => {
+      if (e.error) {
+        return `<div class="attest-row error"><strong>${escapeHtml(e.label)}</strong> <span>${escapeHtml(e.error)}</span></div>`;
+      }
+      const start = e.start ? formatUnits18(e.start) : "--";
+      const peak = e.peak ? formatUnits18(e.peak) : "--";
+      const maxDd = e.maxDdBps != null ? formatBps(e.maxDdBps) : "--";
+      const cp = e.checkpoints != null ? `${e.checkpoints} chkpt` : "";
+      const bal = e.lastCheckpointBalance != null ? formatUnits18(e.lastCheckpointBalance) : "";
+      return `<div class="attest-row"><strong>${escapeHtml(e.label)}</strong> <small>${escapeHtml(shorten(e.commitment))}</small> <span>start ${escapeHtml(start)}</span> <span>peak ${escapeHtml(peak)}</span> <span>maxDD ${escapeHtml(maxDd)}</span> <span>${escapeHtml(cp)} ${bal ? `last ${escapeHtml(bal)}` : ""}</span></div>`;
+    })
+    .join("\n");
+}
+
+export function renderPublicStatusHtml(config, state) {
+  const addr = config.arenaAddress ? shorten(config.arenaAddress) : "not configured";
+  const rpc = config.rpcUrl ? new URL(config.rpcUrl).hostname : "no RPC";
+  if (state?.error) {
+    return `<div class="loading-placeholder">Public RPC read failed: ${escapeHtml(state.error)} — check RPC URL and arena address. <a href="#" data-action="configure-public">Configure</a></div>`;
+  }
+  return `<div class="public-status">Public <strong>${escapeHtml(config.network)}</strong> &middot; arena ${escapeHtml(addr)} &middot; ${escapeHtml(rpc)}</div>`;
 }
 

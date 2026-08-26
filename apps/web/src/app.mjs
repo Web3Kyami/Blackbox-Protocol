@@ -18,6 +18,19 @@ import {
   networkLabelFor,
   buildCanonicalRulesJson,
   buildEvidenceExportPayload,
+  SEPOLIA_B1_DEFAULTS,
+  SEPOLIA_B1_STRATEGIES,
+  parseFloatTokenResult,
+  parseAttestStartResult,
+  parseAttestPeakResult,
+  parseAttestMaxDdResult,
+  parseCheckpointCountResult,
+  parseCheckpointResult,
+  parseActionCountsResult,
+  formatUnits18,
+  resolvePublicRpcConfig,
+  renderAttestedFloatHtml,
+  renderPublicStatusHtml,
 } from "./dashboard-model.mjs";
 
 let sessionData = null;
@@ -26,18 +39,51 @@ let currentTab = "live"; // "live" | "case-study"
 let lastReceiptId = "0x544f52544f4953455f4f4b"; // default replay candidate
 let wallet = { provider: null, address: null, name: null };
 
+let publicConfig = null;
+let publicModeActive = false;
+
+function getPublicConfig() {
+  try {
+    return resolvePublicRpcConfig({
+      searchParams: new URLSearchParams(window.location.search),
+      storage: window.localStorage,
+      hostname: window.location.hostname,
+    });
+  } catch {
+    return resolvePublicRpcConfig({ searchParams: new URLSearchParams(), storage: null, hostname: "" });
+  }
+}
+
+async function starknetCall(rpcUrl, contractAddress, selector, calldata) {
+  const res = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "starknet_call",
+      params: [{ contract_address: contractAddress, entry_point_selector: selector, calldata }, "latest"],
+    }),
+  });
+  return res.json();
+}
+
 // ── Lifecycle Initialization ──────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
   setupTabs();
   setupStageCControls();
   setupWalletControls();
+  setupPublicRpcControls();
   await loadCaseStudyFixture();
+  publicConfig = getPublicConfig();
   await refreshDevnetState();
 
   const refreshBtn = document.querySelector("#refresh-devnet-btn");
   if (refreshBtn) {
     refreshBtn.addEventListener("click", () => {
-      refreshDevnetState();
+      publicConfig = getPublicConfig();
+      if (publicModeActive) refreshPublicState();
+      else refreshDevnetState();
     });
   }
 
@@ -46,8 +92,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     exportBtn.addEventListener("click", exportEvidenceJson);
   }
 
-  // Periodic polling for live session state
-  setInterval(refreshDevnetState, 8000);
+  // Periodic polling for live session state (devnet or public)
+  setInterval(() => {
+    if (publicModeActive) refreshPublicState();
+    else refreshDevnetState();
+  }, 8000);
 });
 
 function getCurrentRole() {
@@ -157,8 +206,19 @@ function setupWalletControls() {
 
   if (selfRegBtn) {
     selfRegBtn.addEventListener("click", async () => {
-      if (!sessionData || sessionData.status !== "active") {
-        showTxError("Join Failed", "Devnet session is offline. Start the local session service first.");
+      const cfg = getPublicConfig();
+      const inPublic = cfg.hasPublicConfig || publicModeActive;
+      const arenaForJoin = inPublic ? cfg.arenaAddress : sessionData?.addresses?.arenaAddress;
+      const rpcForJoin = inPublic ? cfg.rpcUrl : sessionData?.rpcUrl;
+      const sessionOk = sessionData && sessionData.status === "active";
+      if (!arenaForJoin || (!sessionOk && !inPublic)) {
+        if (inPublic && !cfg.rpcUrl) {
+          showTxError("Join Failed", "Public RPC not configured. Set rpcUrl in localStorage (bb:rpcUrl) or via ?rpcUrl=...&arena=0x...&network=sepolia.");
+        } else if (inPublic) {
+          showTxError("Join Failed", "Public arena not reachable. Check RPC URL and arena address in configuration.");
+        } else {
+          showTxError("Join Failed", "Devnet session is offline. Start the local session service first or append ?network=sepolia&arena=0x...&rpcUrl=... for Sepolia.");
+        }
         return;
       }
       const input = document.querySelector("#self-reg-commitment-input");
@@ -185,7 +245,7 @@ function setupWalletControls() {
 
       let call;
       try {
-        call = buildRegisterStrategyCall(sessionData.addresses.arenaAddress, normalized.value);
+        call = buildRegisterStrategyCall(arenaForJoin, normalized.value);
       } catch (err) {
         showTxError("Invalid Commitment", err.message);
         return;
@@ -204,7 +264,8 @@ function setupWalletControls() {
           { txHash },
         );
         await verifyRegistrantBinding(normalized.value, txHash);
-        await refreshDevnetState();
+        if (publicModeActive) await refreshPublicState();
+        else await refreshDevnetState();
       } catch (err) {
         showTxError("Registration Failed", mapWalletError(err));
       }
@@ -213,9 +274,12 @@ function setupWalletControls() {
 }
 
 async function verifyRegistrantBinding(commitment, txHash) {
-  if (!sessionData) return null;
+  const cfg = getPublicConfig();
+  const arena = publicModeActive ? cfg.arenaAddress : sessionData?.addresses?.arenaAddress;
+  const rpcUrl = publicModeActive ? cfg.rpcUrl : sessionData?.rpcUrl;
+  if (!arena || !rpcUrl) return null;
   try {
-    const res = await fetch(sessionData.rpcUrl, {
+    const res = await fetch(rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -224,7 +288,7 @@ async function verifyRegistrantBinding(commitment, txHash) {
         method: "starknet_call",
         params: [
           {
-            contract_address: sessionData.addresses.arenaAddress,
+            contract_address: arena,
             entry_point_selector: SELECTORS.get_registrant,
             calldata: [commitment],
           },
@@ -618,7 +682,29 @@ async function refreshDevnetState() {
       return;
     }
   } catch {
-    // Session service offline
+    // Session service offline — try public RPC fallback (Sepolia/mainnet) before showing offline
+    const cfg = getPublicConfig();
+    if (cfg.hasPublicConfig && cfg.rpcUrl && cfg.arenaAddress) {
+      publicConfig = cfg;
+      try {
+        await refreshPublicState();
+        return;
+      } catch {
+        // fall through to offline if public also fails
+      }
+    }
+  }
+
+  // If devnet active check did not return and public fallback not taken or failed, check explicit public mode request
+  const explicitCfg = getPublicConfig();
+  if (explicitCfg.hasPublicConfig && explicitCfg.rpcUrl && explicitCfg.arenaAddress) {
+    publicConfig = explicitCfg;
+    try {
+      await refreshPublicState();
+      return;
+    } catch {
+      // fall through
+    }
   }
 
   // Handle Disconnected State
@@ -640,6 +726,381 @@ async function refreshDevnetState() {
   const liveFeed = document.querySelector("#live-feed");
   if (liveFeed) {
     liveFeed.innerHTML = offlineState.feedHtml;
+  }
+  publicModeActive = false;
+  // When offline, surface public-RPC config hint so judges can instantly switch to Sepolia B1 demo
+  try {
+    const cfg2 = getPublicConfig();
+    const form2 = document.querySelector("#public-rpc-config-form");
+    if (form2) {
+      if (!cfg2.hasPublicConfig) {
+        form2.style.display = "flex";
+        // Add hint link if not present
+        let hint = document.querySelector("#public-hint-row");
+        if (!hint) {
+          hint = document.createElement("div");
+          hint.id = "public-hint-row";
+          hint.style.cssText = "margin-top:8px;font-size:12px;opacity:0.85";
+          const dis = document.querySelector("#disconnected-banner");
+          if (dis) dis.appendChild(hint);
+        }
+        if (hint) hint.innerHTML = `Devnet offline — <a href="?network=sepolia&arena=${SEPOLIA_B1_DEFAULTS.arenaAddress}&rpcUrl=${encodeURIComponent(SEPOLIA_B1_DEFAULTS.rpcHint)}" style="color:#6ea8fe">view B1 Sepolia demo (public RPC)</a> or configure above.`;
+      } else if (cfg2.rpcUrl && cfg2.arenaAddress) {
+        // Had config but RPC failed — show error and keep form open
+        form2.style.display = "flex";
+        const hint = document.querySelector("#public-hint-row");
+        if (hint) hint.textContent = `Public RPC failed — check RPC URL and arena address, then Save & Connect.`;
+      }
+    }
+    if (topbarBadge && cfg2.hasPublicConfig) {
+      topbarBadge.innerHTML = `<i></i> Public RPC unreachable`;
+      topbarBadge.className = "network disconnected";
+    }
+  } catch {}
+}
+
+// ── Public-RPC Mode (Sepolia / Mainnet) ─────────────────────────────────────
+
+function setupPublicRpcControls() {
+  const cfg = getPublicConfig();
+  // Auto-create minimal config form if missing (injected into disconnected banner)
+  let form = document.querySelector("#public-rpc-config-form");
+  if (!form) {
+    const banner = document.querySelector("#disconnected-banner");
+    if (banner) {
+      form = document.createElement("div");
+      form.id = "public-rpc-config-form";
+      form.style.cssText = "margin-top:12px;padding:12px;border:1px solid #2a2a3a;background:#0f0f14;border-radius:8px;display:none;flex-direction:column;gap:8px;max-width:520px;";
+      form.innerHTML = `
+        <strong style="font-size:13px">Public RPC — Sepolia / Mainnet</strong>
+        <small style="opacity:0.7">When devnet is offline, append <code>?network=sepolia&arena=0x...&rpcUrl=https://...</code> or fill below and Save. Defaults to B1 Sepolia demo (0x52d02e...).</small>
+        <label style="font-size:12px">RPC URL <input id="public-rpc-url-input" placeholder="https://starknet-sepolia-rpc.publicnode.com" style="width:100%;margin-top:4px;padding:6px;border-radius:4px;border:1px solid #333;background:#111;color:#ddd"/></label>
+        <label style="font-size:12px">Arena Address <input id="public-arena-input" placeholder="0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51" style="width:100%;margin-top:4px;padding:6px;border-radius:4px;border:1px solid #333;background:#111;color:#ddd"/></label>
+        <label style="font-size:12px">Adapter Address (optional) <input id="public-adapter-input" placeholder="0x42cfafc785c1abeb076c34bcad1e1f698a4e9cf8488a8fbb0ae783acec18c20" style="width:100%;margin-top:4px;padding:6px;border-radius:4px;border:1px solid #333;background:#111;color:#ddd"/></label>
+        <div style="display:flex;gap:8px">
+          <button id="public-save-btn" class="pill-btn" style="flex:0">Save & Connect</button>
+          <button id="public-clear-btn" class="pill-btn" style="flex:0">Clear</button>
+          <button id="public-demo-btn" class="pill-btn" style="flex:0">Load B1 Demo</button>
+        </div>
+        <small style="opacity:0.6">Saved to localStorage bb:rpcUrl / bb:arenaAddress / bb:adapterAddress. Use <code>&rpcUrl=</code> query param to override without saving.</small>`;
+      banner.appendChild(form);
+    }
+  }
+  const urlInput = document.querySelector("#public-rpc-url-input");
+  const arenaInput = document.querySelector("#public-arena-input");
+  const adapterInput = document.querySelector("#public-adapter-input");
+  const saveBtn = document.querySelector("#public-save-btn");
+  const clearBtn = document.querySelector("#public-clear-btn");
+  const demoBtn = document.querySelector("#public-demo-btn");
+  const toggleBtn = document.querySelector("#public-config-toggle");
+  if (urlInput) urlInput.value = cfg.rpcUrl || "";
+  if (arenaInput) arenaInput.value = cfg.arenaAddress || "";
+  if (adapterInput) adapterInput.value = cfg.adapterAddress || "";
+  const toggle = () => {
+    if (!form) return;
+    form.style.display = form.style.display === "none" || !form.style.display ? "flex" : "none";
+  };
+  if (toggleBtn && !toggleBtn.dataset.bound) {
+    toggleBtn.dataset.bound = "1";
+    toggleBtn.addEventListener("click", toggle);
+  }
+  // Also bind click on disconnected banner title to toggle form when public hint shown
+  const banner = document.querySelector("#disconnected-banner");
+  if (banner && !banner.dataset.publicBound) {
+    banner.dataset.publicBound = "1";
+    banner.addEventListener("click", (e) => {
+      if (e.target.closest("#public-rpc-config-form") || e.target.closest("button") || e.target.closest("a")) return;
+      // allow toggling when offline
+      const fb = document.querySelector("#public-rpc-config-form");
+      if (fb && getPublicConfig().hasPublicConfig === false) toggle();
+    });
+  }
+  if (saveBtn && !saveBtn.dataset.bound) {
+    saveBtn.dataset.bound = "1";
+    saveBtn.addEventListener("click", () => {
+      try {
+        if (urlInput?.value.trim()) localStorage.setItem("bb:rpcUrl", urlInput.value.trim());
+        else localStorage.removeItem("bb:rpcUrl");
+        if (arenaInput?.value.trim()) localStorage.setItem("bb:arenaAddress", arenaInput.value.trim());
+        else localStorage.removeItem("bb:arenaAddress");
+        if (adapterInput?.value.trim()) localStorage.setItem("bb:adapterAddress", adapterInput.value.trim());
+        else localStorage.removeItem("bb:adapterAddress");
+        localStorage.setItem("bb:network", "sepolia");
+      } catch {}
+      publicConfig = getPublicConfig();
+      refreshPublicState();
+    });
+  }
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      try {
+        localStorage.removeItem("bb:rpcUrl");
+        localStorage.removeItem("bb:arenaAddress");
+        localStorage.removeItem("bb:adapterAddress");
+        localStorage.removeItem("bb:network");
+      } catch {}
+      if (urlInput) urlInput.value = "";
+      if (arenaInput) arenaInput.value = "";
+      if (adapterInput) adapterInput.value = "";
+      publicConfig = getPublicConfig();
+      publicModeActive = false;
+      refreshDevnetState();
+    });
+  }
+  if (demoBtn && !demoBtn.dataset.bound) {
+    demoBtn.dataset.bound = "1";
+    demoBtn.addEventListener("click", () => {
+      if (urlInput) urlInput.value = SEPOLIA_B1_DEFAULTS.rpcHint;
+      if (arenaInput) arenaInput.value = SEPOLIA_B1_DEFAULTS.arenaAddress;
+      if (adapterInput) adapterInput.value = SEPOLIA_B1_DEFAULTS.adapterAddress;
+    });
+  }
+}
+
+async function refreshPublicState() {
+  const cfg = publicConfig || getPublicConfig();
+  publicConfig = cfg;
+  if (!cfg.rpcUrl || !cfg.arenaAddress) {
+    publicModeActive = false;
+    throw new Error("Public RPC not configured");
+  }
+  publicModeActive = true;
+  const topbarBadge = document.querySelector("#topbar-network-badge");
+  const disBanner = document.querySelector("#disconnected-banner");
+  const arenaAddrEl = document.querySelector("#env-arena-address");
+  const blockNumberEl = document.querySelector("#env-block-number");
+  const rpcUrlEl = document.querySelector("#env-rpc-url");
+  const adapterStatusEl = document.querySelector("#env-adapter-status");
+  const roundStatusEl = document.querySelector("#live-round-status");
+  if (topbarBadge) {
+    const label = cfg.network === "mainnet" ? "Mainnet \u00b7 Public" : "Sepolia \u00b7 Public";
+    topbarBadge.className = "network live";
+    topbarBadge.innerHTML = `<i></i> ${label}`;
+  }
+  if (disBanner) disBanner.style.display = "none";
+  if (arenaAddrEl) {
+    arenaAddrEl.textContent = shorten(cfg.arenaAddress);
+    arenaAddrEl.title = cfg.arenaAddress;
+  }
+  if (rpcUrlEl) {
+    try {
+      rpcUrlEl.textContent = new URL(cfg.rpcUrl).hostname;
+      rpcUrlEl.title = cfg.rpcUrl;
+    } catch {
+      rpcUrlEl.textContent = shorten(cfg.rpcUrl);
+    }
+  }
+  if (blockNumberEl) blockNumberEl.textContent = "#public";
+  // Fetch block number for display (best-effort)
+  try {
+    const blk = await fetch(cfg.rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "starknet_blockNumber", params: [] }),
+    }).then((r) => r.json());
+    if (blk && typeof blk.result === "number" && blockNumberEl) blockNumberEl.textContent = `#${blk.result}`;
+  } catch {}
+  // Adapter + rules
+  await fetchAndRenderPublicOnChainMeta(cfg, adapterStatusEl);
+  await fetchAndRenderPublicScores(cfg);
+  await fetchAndRenderPublicAttested(cfg);
+  await fetchAndRenderPublicSettlement(cfg, roundStatusEl);
+  renderPublicTopMeta(cfg);
+  // Config form is hidden when connected
+  const form = document.querySelector("#public-rpc-config-form");
+  if (form) form.style.display = "none";
+}
+
+function renderPublicTopMeta(cfg) {
+  const metaEl = document.querySelector("#public-meta-row");
+  let el = metaEl;
+  if (!el) {
+    const anchor = document.querySelector("#env-arena-address")?.parentElement;
+    if (anchor && anchor.parentElement) {
+      el = document.createElement("div");
+      el.id = "public-meta-row";
+      el.style.cssText = "margin:8px 0;font-size:12px;opacity:0.85";
+      anchor.parentElement.appendChild(el);
+    }
+  }
+  if (el) el.innerHTML = renderPublicStatusHtml(cfg, null);
+}
+
+async function fetchAndRenderPublicOnChainMeta(cfg, adapterStatusEl) {
+  const rulesEl = document.querySelector("#live-rules-commit");
+  const adapterEl = document.querySelector("#live-adapter-addr");
+  try {
+    const r = await starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.rules_commitment, []);
+    if (r.result && r.result.length > 0 && rulesEl) {
+      rulesEl.textContent = r.result[0];
+      rulesEl.title = `On-chain rules commitment: ${r.result[0]}`;
+    }
+  } catch {
+    if (rulesEl) rulesEl.textContent = "Error reading rules";
+  }
+  try {
+    const a = await starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_action_adapter, []);
+    if (a.result && a.result.length > 0) {
+      const addr = a.result[0];
+      if (adapterEl) {
+        adapterEl.textContent = shorten(addr);
+        adapterEl.title = `On-chain action adapter: ${addr}`;
+      }
+      if (adapterStatusEl) {
+        const locked = addr && BigInt(addr) !== 0n;
+        adapterStatusEl.textContent = locked ? "Locked" : "Unlocked";
+        adapterStatusEl.className = `status-badge ${locked ? "locked" : "live"}`;
+      }
+    }
+  } catch {
+    if (adapterStatusEl) adapterStatusEl.textContent = "Unknown";
+  }
+  // Float token
+  try {
+    const ft = await starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_float_token, []);
+    const parsed = parseFloatTokenResult(ft);
+    const ftEl = document.querySelector("#live-float-token");
+    let host = ftEl;
+    if (!host) {
+      const anchor = document.querySelector("#live-registered-list")?.parentElement;
+      if (anchor) {
+        host = document.createElement("div");
+        host.id = "live-float-token";
+        host.style.cssText = "margin:8px 0;font-size:12px";
+        anchor.appendChild(host);
+      }
+    }
+    if (host) {
+      host.textContent = parsed.ok ? `Float token: ${shorten(parsed.token)}` : `Float token: ${parsed.error}`;
+      if (parsed.ok) host.title = parsed.token;
+    }
+  } catch {}
+}
+
+async function fetchAndRenderPublicScores(cfg) {
+  const leaderboardEl = document.querySelector("#live-leaderboard");
+  if (!leaderboardEl) return;
+  const list = cfg.arenaAddress.toLowerCase() === SEPOLIA_B1_DEFAULTS.arenaAddress.toLowerCase() ? SEPOLIA_B1_STRATEGIES : STRATEGIES;
+  const scores = await Promise.all(
+    list.map(async (strat) => {
+      try {
+        const json = await starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_score, [strat.commitment]);
+        return parseScoreEntry(json, strat);
+      } catch {
+        return { label: strat.label, commitment: strat.commitment, error: true, errorReason: "RPC connection failed" };
+      }
+    }),
+  );
+  leaderboardEl.innerHTML = renderLeaderboardHtml(scores);
+}
+
+async function fetchAndRenderPublicAttested(cfg) {
+  let container = document.querySelector("#live-attested-float");
+  if (!container) {
+    const anchor = document.querySelector("#live-leaderboard")?.parentElement;
+    if (anchor) {
+      container = document.createElement("div");
+      container.id = "live-attested-float";
+      container.style.cssText = "margin:12px 0;padding:10px;border:1px solid #222;border-radius:8px;background:#0a0a0f";
+      const title = document.createElement("div");
+      title.style.cssText = "font-size:13px;font-weight:600;margin-bottom:8px";
+      title.textContent = "Attested Float Snapshots (Option B) — live balance_of + checkpoints";
+      container.appendChild(title);
+      const body = document.createElement("div");
+      body.id = "live-attested-float-body";
+      container.appendChild(body);
+      // Insert after leaderboard
+      const lb = document.querySelector("#live-leaderboard");
+      if (lb && lb.parentElement) lb.parentElement.insertBefore(container, lb.nextSibling);
+      else anchor.appendChild(container);
+      container = body;
+    }
+  } else if (container.querySelector("#live-attested-float-body")) {
+    container = container.querySelector("#live-attested-float-body");
+  }
+  if (!container) return;
+  const list2 = cfg.arenaAddress.toLowerCase() === SEPOLIA_B1_DEFAULTS.arenaAddress.toLowerCase() ? SEPOLIA_B1_STRATEGIES : STRATEGIES;
+  const entries = await Promise.all(
+    list2.map(async (strat) => {
+      try {
+        const [sRes, pRes, dRes, cRes] = await Promise.all([
+          starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_attest_start, [strat.commitment]),
+          starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_attest_peak, [strat.commitment]),
+          starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_attest_max_dd, [strat.commitment]),
+          starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_checkpoint_count, [strat.commitment]),
+        ]);
+        const s = parseAttestStartResult(sRes);
+        const p = parseAttestPeakResult(pRes);
+        const d = parseAttestMaxDdResult(dRes);
+        const c = parseCheckpointCountResult(cRes);
+        let lastBal = null;
+        if (c.ok && c.count > 0) {
+          const lastIdx = String(c.count - 1);
+          const cp = await starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_checkpoint, [strat.commitment, lastIdx]);
+          const parsed = parseCheckpointResult(cp);
+          if (parsed.ok) lastBal = parsed.balanceRaw;
+        }
+        if (!s.ok && !p.ok && !d.ok && !c.ok) return { label: strat.label, commitment: strat.commitment, error: "No attested float for this commitment" };
+        return {
+          label: strat.label,
+          commitment: strat.commitment,
+          start: s.ok ? s.raw : null,
+          peak: p.ok ? p.raw : null,
+          maxDdBps: d.ok ? d.bps : null,
+          checkpoints: c.ok ? c.count : null,
+          lastCheckpointBalance: lastBal,
+        };
+      } catch (e) {
+        return { label: strat.label, commitment: strat.commitment, error: String(e?.message || e) };
+      }
+    }),
+  );
+  container.innerHTML = renderAttestedFloatHtml(entries);
+}
+
+async function fetchAndRenderPublicSettlement(cfg, roundStatusEl) {
+  try {
+    const [winnerRes, settleRes] = await Promise.all([
+      starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_winner, []),
+      starknetCall(cfg.rpcUrl, cfg.arenaAddress, SELECTORS.get_settlement, []),
+    ]);
+    let winner = "0x0";
+    let settled = false;
+    let amountUnits = 0;
+    if (winnerRes && Array.isArray(winnerRes.result) && winnerRes.result.length > 0) {
+      winner = winnerRes.result[0];
+      settled = winner && BigInt(winner) !== 0n;
+    }
+    const parsedSet = parseSettlementEntry(settleRes);
+    if (parsedSet.settled) {
+      settled = true;
+      winner = parsedSet.winner;
+      amountUnits = parsedSet.amountUnits;
+    }
+    if (roundStatusEl) {
+      if (settled) {
+        roundStatusEl.textContent = "Settled";
+        roundStatusEl.className = "status-badge settled";
+      } else if (winner && BigInt(winner) !== 0n) {
+        roundStatusEl.textContent = "Closed (Winner Derived)";
+        roundStatusEl.className = "status-badge locked";
+      } else {
+        roundStatusEl.textContent = "Active";
+        roundStatusEl.className = "status-badge live";
+      }
+    }
+    // Reuse settlement banner helper with synthetic session shape
+    renderSettlementBanner({ settled, closed: settled || (winner && BigInt(winner) !== 0n), winner, settlementAmount: amountUnits });
+  } catch {}
+  // Evidence feed note for public mode
+  const feedEl = document.querySelector("#live-feed");
+  if (feedEl && !feedEl.dataset.publicNote) {
+    feedEl.dataset.publicNote = "1";
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:11px;opacity:0.6;margin-bottom:6px";
+    note.textContent = "Public RPC: evidence receipts are session-local. On-chain contract reads above are authoritative.";
+    feedEl.parentElement?.insertBefore(note, feedEl);
   }
 }
 
