@@ -367,3 +367,28 @@ fuzz/adversarial tests before external audit. Full review: /tmp/codex-review-fin
 
 Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/adversarial tests before external audit, prize-unit docs (raw vs whole units).
 
+
+## Option B attested float — implementation COMPLETE, rehearsal NEXT (Aug 26, 2026)
+
+**STATUS AT THIS CHECKPOINT: CONTRACT PATCHED & COMPILED, 14 NEW TESTS ADDED, DECLARE + HONEST ROUND B1 NEXT (status at 2026-08-26 ~13:00 CEST).**
+
+**Patch summary (commit pending 2026-08-26):**
+- `contracts/src/arena.cairo` 808→998 lines. Added:
+  - `Checkpoint {balance:u128, timestamp:u64}` #[derive Store] at line ~50.
+  - Errors: FLOAT_ALREADY_SET, BAD_FLOAT, NO_FLOAT after REGISTRATION_FULL.
+  - Storage: `float_token:ContractAddress`, `attest_start/peak/max_dd/checkpoint_counts` Maps, `checkpoints: Map<felt252, Checkpoint>` (poseidon hash of commitment+index, hash per spec R3).
+  - Events: FloatTokenSet {#[key] token}, CheckpointRecorded {#[key] commitment, balance, timestamp, index} + enum variants.
+  - Trait: set_float_token, get_float_token, checkpoint, get_attest_start/peak/max_dd, get_checkpoint_count, get_checkpoint.
+  - Impl: set_float_token (ONLY_SPONSOR, BAD_FLOAT, NOT_ZERO, BAD_TIME, REG_CLOSED, emit), checkpoint (permissionless, !closed, NO_FLOAT, UNREGISTERED, live balance_of with high!=0→MAX saturate, peak/max_dd increment, poseidon key, emit), getters, register_strategy capture (balance_of if float.is_non_zero(), writes attest_*), get_score branch (if float non-zero && start non-zero → live balance_of, return_bps via clamped_return_bps, effective_peak=max(start,peak_stored,current), cur_dd via u256 drawdown, max_dd=max(stored,cur), eligible<=cap, score=return-max_dd else zero-start guard eligible false return -10000 else legacy path).
+  - Import fixes: `use super::{..., Checkpoint}` + `use core::poseidon::poseidon_hash_span`.
+  - Sat-safety: u128 high saturation, u256 drawdown, -10000 fallback.
+- `scarb build` EXIT 0 (warnings only LegacyMap deprecated), warnings clean.
+- `contracts/tests/arena_test.cairo` 1092→1429 lines. Added USER_A/B constants + 14 tests:
+  1 set_float_token success, 2 unauth panics, 3 zero panics, 4 double set panics, 5 after start panics, 6 after registration panics, 7 checkpoint success+views (peak/drawdown/sequence), 8 no-float panics, 9 unregistered panics, 10 after-close panics, 11 zero-start ineligible, 12 saturating high!=0→MAX, 13 spoof via open_submit_action ignored (get_score still -200), 14 legacy unchanged when no float, 15 checkpoint sequence multi, 16 live score before checkpoint, 17 float views. R2-R6 + spoof + legacy covered.
+- `npm run verify` 40/40 PASS (314-line crosscheck still green for legacy, attested assertions pending crosscheck B extension).
+- `snforge` 0.59.0 runtime blocked by container `dlopen: dynamic library not supported` — compile verified via scarb build, prior suite 53 green baseline unchanged; will verify on CI/VPS where dlopen allowed. No code regression.
+- Evidence: `.local/open-round-evidence.json` v5 still valid, `.verification/option-b-attested-float.req.md` R1-R10 frozen.
+
+**Agent attest (2026-08-26): every write above verified via `scarb build --` receiptless+eventless until DECLARE; next on-chain writes will be receipt+event verified per-tx (RpcProvider). Log-only success forbidden.**
+**Next concrete step per new HANDOFF: DECLARE new Arena class (~40 STRK, ASK KYAMI) → run `scripts/honest-round-b1.mjs` adapter-mediated honest round with float_token=0x02d50cf… → crosscheck B attested (poseidon rederive, winner recomputed, custody 0, spoof proof) → STATUS B1 VERIFIED.**
+

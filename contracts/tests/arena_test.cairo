@@ -26,6 +26,8 @@ const PULSE: felt252 = 'PULSE_COMMIT';
 const OTHER: ContractAddress = 'OTHER_USER'.try_into().unwrap();
 const ASSET2: ContractAddress = 'SECOND_ASSET'.try_into().unwrap();
 const TARGET2: ContractAddress = 'SECOND_TARGET'.try_into().unwrap();
+const USER_A: ContractAddress = 'USER_A'.try_into().unwrap();
+const USER_B: ContractAddress = 'USER_B'.try_into().unwrap();
 
 fn deploy_arena_raw_with_prize(prize: ContractAddress) -> (ContractAddress, IArenaDispatcher) {
     let contract = declare("Arena").unwrap_syscall().contract_class();
@@ -1090,3 +1092,338 @@ fn test_refund_escrow_before_close_panics() {
 
     arena.refund_escrow('HOLD_IT');
 }
+
+// ============ Option B attested float tests (R1-R10) ============
+
+#[test]
+fn test_float_token_set_success() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    assert_eq!(arena.get_float_token(), float.contract_address);
+}
+
+#[test]
+#[should_panic(expected: ('ONLY_SPONSOR',))]
+fn test_float_token_unauthorized_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, OTHER);
+    arena.set_float_token(float.contract_address);
+}
+
+#[test]
+#[should_panic(expected: ('BAD_FLOAT',))]
+fn test_float_token_zero_panics() {
+    let prize = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_float_token(Zero::zero());
+}
+
+#[test]
+#[should_panic(expected: ('FLOAT_SET',))]
+fn test_float_token_double_set_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let float2 = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    arena.set_float_token(float2.contract_address);
+}
+
+#[test]
+#[should_panic(expected: ('BAD_TIME',))]
+fn test_float_token_after_start_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_block_timestamp(address, START);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_float_token(float.contract_address);
+}
+
+#[test]
+#[should_panic(expected: ('REG_CLOSED',))]
+fn test_float_token_after_registration_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    arena.register_strategy(FALCON);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_float_token(float.contract_address);
+}
+
+#[test]
+fn test_attested_registration_and_views() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, 1000_u256);
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('ATTEST1');
+    stop_cheat_caller_address(address);
+    assert_eq!(arena.get_attest_start('ATTEST1'), 1000_u128);
+    assert_eq!(arena.get_attest_peak('ATTEST1'), 1000_u128);
+    assert_eq!(arena.get_attest_max_dd('ATTEST1'), 0_u16);
+    let score = arena.get_score('ATTEST1');
+    assert_eq!(score.final_value, 1000_u128);
+    assert_eq!(score.return_bps, 0);
+    assert!(score.eligible);
+}
+
+#[test]
+fn test_checkpoint_updates_peak_and_dd() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, 1000_u256);
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('CHK1');
+    stop_cheat_caller_address(address);
+    // increase to 1500
+    float.mint(USER_A, 500_u256);
+    start_cheat_block_timestamp(address, START + 10);
+    arena.checkpoint('CHK1');
+    stop_cheat_block_timestamp(address);
+    assert_eq!(arena.get_attest_peak('CHK1'), 1500_u128);
+    assert_eq!(arena.get_checkpoint_count('CHK1'), 1);
+    let (bal, _) = arena.get_checkpoint('CHK1', 0);
+    assert_eq!(bal, 1500_u128);
+    // drawdown to 1350 via transfer
+    start_cheat_caller_address(float.contract_address, USER_A);
+    float.transfer(OTHER, 150_u256);
+    stop_cheat_caller_address(float.contract_address);
+    start_cheat_block_timestamp(address, START + 20);
+    arena.checkpoint('CHK1');
+    stop_cheat_block_timestamp(address);
+    assert_eq!(arena.get_attest_peak('CHK1'), 1500_u128);
+    // (1500-1350)*10000/1500 = 1000
+    assert_eq!(arena.get_attest_max_dd('CHK1'), 1000_u16);
+    assert_eq!(arena.get_checkpoint_count('CHK1'), 2);
+    let score = arena.get_score('CHK1');
+    // return (1350-1000)*10000/1000 = 3500
+    assert_eq!(score.return_bps, 3500);
+    assert_eq!(score.max_drawdown_bps, 1000);
+    assert!(score.eligible);
+    assert_eq!(score.score_bps, 2500);
+}
+
+#[test]
+#[should_panic(expected: ('NO_FLOAT',))]
+fn test_checkpoint_no_float_panics() {
+    let (address, arena) = deploy_arena();
+    arena.register_strategy(FALCON);
+    arena.checkpoint(FALCON);
+}
+
+#[test]
+#[should_panic(expected: ('UNREGISTERED',))]
+fn test_checkpoint_unregistered_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_block_timestamp(address, START + 5);
+    arena.checkpoint('NOPE');
+}
+
+#[test]
+#[should_panic(expected: ('ALREADY_CLOSED',))]
+fn test_checkpoint_after_close_panics() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, 1000_u256);
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('CLOSECHK');
+    stop_cheat_caller_address(address);
+    start_cheat_block_timestamp(address, END);
+    arena.close();
+    arena.checkpoint('CLOSECHK');
+}
+
+#[test]
+fn test_zero_start_ineligible_guard() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    // no mint to USER_B -> balance 0
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_B);
+    arena.register_strategy('ZERO1');
+    stop_cheat_caller_address(address);
+    assert_eq!(arena.get_attest_start('ZERO1'), 0_u128);
+    let score = arena.get_score('ZERO1');
+    assert_eq!(score.return_bps, -10000);
+    assert!(!score.eligible);
+    assert_eq!(score.score_bps, 0);
+}
+
+#[test]
+fn test_saturating_high_balance() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, u256 { low: 0, high: 1 });
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('HIGH1');
+    stop_cheat_caller_address(address);
+    assert_eq!(arena.get_attest_start('HIGH1'), 0xffffffffffffffffffffffffffffffff_u128);
+    let score = arena.get_score('HIGH1');
+    // current also MAX, return 0, no panic
+    assert_eq!(score.return_bps, 0);
+    assert!(score.eligible);
+}
+
+#[test]
+fn test_spoof_via_submit_action_no_effect() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, 1000_u256);
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('SPOOF1');
+    stop_cheat_caller_address(address);
+    // live score 0
+    let s0 = arena.get_score('SPOOF1');
+    assert_eq!(s0.return_bps, 0);
+    // spoof attempt: change current_value via adapter submit_action to 10000
+    start_cheat_block_timestamp(address, START + 5);
+    start_cheat_caller_address(address, ADAPTER);
+    arena.submit_action('SPOOF_R1', 'SPOOF1', ASSET, TARGET, 100_u128, 1000_u128, 10000_u128, 0_u16);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    // get_score should still reflect live balance 1000, not spoofed 10000
+    let s1 = arena.get_score('SPOOF1');
+    assert_eq!(s1.final_value, 1000_u128);
+    assert_eq!(s1.return_bps, 0);
+}
+
+#[test]
+fn test_legacy_path_unchanged_without_float() {
+    let (address, arena) = deploy_arena();
+    arena.register_strategy('LEGACY1');
+    // legacy: starting_units 1000, current 1000, return 0
+    let s0 = arena.get_score('LEGACY1');
+    assert_eq!(s0.return_bps, 0);
+    // submit via adapter to increase to 1500 with dd 500
+    start_cheat_block_timestamp(address, START + 5);
+    start_cheat_caller_address(address, ADAPTER);
+    arena.submit_action('LEG_R1', 'LEGACY1', ASSET, TARGET, 100_u128, 1000_u128, 1500_u128, 500_u16);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    let s1 = arena.get_score('LEGACY1');
+    // return (1500-1000)*10000/1000 = 5000, max_dd 500, score 4500
+    assert_eq!(s1.return_bps, 5000);
+    assert_eq!(s1.max_drawdown_bps, 500_u16);
+    assert_eq!(s1.score_bps, 4500);
+}
+
+#[test]
+fn test_attested_winner_selection() {
+    let prize = deploy_prize_token();
+    let float = deploy_prize_token();
+    float.mint(USER_A, 1000_u256);
+    float.mint(USER_B, 1000_u256);
+    let (address, arena) = deploy_arena_raw_with_prize(prize.contract_address);
+    start_cheat_block_timestamp(address, START - 1);
+    start_cheat_caller_address(address, AMARA);
+    arena.set_price(ASSET, 1_000_000_000_000_000_000);
+    arena.set_action_adapter(ADAPTER);
+    arena.set_float_token(float.contract_address);
+    stop_cheat_caller_address(address);
+    stop_cheat_block_timestamp(address);
+    start_cheat_caller_address(address, USER_A);
+    arena.register_strategy('WIN_A');
+    stop_cheat_caller_address(address);
+    start_cheat_caller_address(address, USER_B);
+    arena.register_strategy('WIN_B');
+    stop_cheat_caller_address(address);
+    // USER_A gains to 2000, USER_B stays 1000
+    float.mint(USER_A, 1000_u256);
+    start_cheat_block_timestamp(address, START + 10);
+    arena.checkpoint('WIN_A');
+    arena.checkpoint('WIN_B');
+    stop_cheat_block_timestamp(address);
+    // close and check winner
+    start_cheat_block_timestamp(address, END);
+    arena.close();
+    let winner = arena.get_winner();
+    assert_eq!(winner, 'WIN_A');
+}
+

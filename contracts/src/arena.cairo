@@ -47,6 +47,12 @@ pub struct ScoreEntry {
     pub registration_order: u32,
 }
 
+#[derive(Copy, Drop, Serde, starknet::Store)]
+struct Checkpoint {
+    balance: u128,
+    timestamp: u64,
+}
+
 #[starknet::interface]
 pub trait IArena<TState> {
     fn set_action_adapter(ref self: TState, action_adapter: ContractAddress);
@@ -110,6 +116,14 @@ pub trait IArena<TState> {
     fn get_action_counts(self: @TState, commitment: felt252) -> (u32, u32);
     fn get_winner(self: @TState) -> felt252;
     fn rules_commitment(self: @TState) -> felt252;
+    fn set_float_token(ref self: TState, token: ContractAddress);
+    fn get_float_token(self: @TState) -> ContractAddress;
+    fn checkpoint(ref self: TState, commitment: felt252);
+    fn get_attest_start(self: @TState, commitment: felt252) -> u128;
+    fn get_attest_peak(self: @TState, commitment: felt252) -> u128;
+    fn get_attest_max_dd(self: @TState, commitment: felt252) -> u16;
+    fn get_checkpoint_count(self: @TState, commitment: felt252) -> u32;
+    fn get_checkpoint(self: @TState, commitment: felt252, index: u32) -> (u128, u64);
 }
 
 #[starknet::contract]
@@ -117,7 +131,8 @@ pub mod Arena {
     use core::num::traits::Zero;
     use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
-    use super::{IArena, IPrizeTokenDispatcher, IPrizeTokenDispatcherTrait, ScoreEntry, StrategyState, reason};
+    use core::poseidon::poseidon_hash_span;
+    use super::{Checkpoint, IArena, IPrizeTokenDispatcher, IPrizeTokenDispatcherTrait, ScoreEntry, StrategyState, reason};
 
     // P1-critical: caller-supplied portfolio values must NEVER be able to panic
     // scoring. Computed magnitude-first in u256 so no intermediate can overflow.
@@ -176,6 +191,9 @@ pub mod Arena {
         pub const AMOUNT_MISMATCH: felt252 = 'AMT_MISMATCH';
         pub const NO_ESCROW: felt252 = 'NO_ESCROW';
         pub const REGISTRATION_FULL: felt252 = 'REG_FULL';
+        pub const FLOAT_ALREADY_SET: felt252 = 'FLOAT_SET';
+        pub const BAD_FLOAT: felt252 = 'BAD_FLOAT';
+        pub const NO_FLOAT: felt252 = 'NO_FLOAT';
     }
 
     #[storage]
@@ -212,6 +230,13 @@ pub mod Arena {
         escrows: Map<felt252, u256>,
         escrow_registrants: Map<felt252, ContractAddress>,
         escrow_assets: Map<felt252, ContractAddress>,
+        // Option B attested float
+        float_token: ContractAddress,
+        attest_start: Map<felt252, u128>,
+        attest_peak: Map<felt252, u128>,
+        attest_max_dd: Map<felt252, u16>,
+        checkpoint_counts: Map<felt252, u32>,
+        checkpoints: Map<felt252, Checkpoint>,
     }
 
     #[event]
@@ -228,6 +253,8 @@ pub mod Arena {
         TargetAdded: TargetAdded,
         PriceSet: PriceSet,
         PrizeDeposited: PrizeDeposited,
+        FloatTokenSet: FloatTokenSet,
+        CheckpointRecorded: CheckpointRecorded,
         PrizePaid: PrizePaid,
     }
 
@@ -316,6 +343,19 @@ pub mod Arena {
         amount: u128,
     }
 
+    #[derive(Drop, starknet::Event)]
+    struct FloatTokenSet {
+        #[key]
+        token: ContractAddress,
+    }
+    #[derive(Drop, starknet::Event)]
+    struct CheckpointRecorded {
+        #[key]
+        commitment: felt252,
+        balance: u128,
+        timestamp: u64,
+        index: u32,
+    }
     #[derive(Drop, starknet::Event)]
     struct PrizePaid {
         #[key]
@@ -438,6 +478,83 @@ pub mod Arena {
             self.action_adapter.read()
         }
 
+        fn set_float_token(ref self: ContractState, token: ContractAddress) {
+            assert(get_caller_address() == self.sponsor.read(), errors::ONLY_SPONSOR);
+            assert(token.is_non_zero(), errors::BAD_FLOAT);
+            assert(self.float_token.read().is_zero(), errors::FLOAT_ALREADY_SET);
+            assert(get_block_timestamp() < self.start_time.read(), errors::BAD_TIME);
+            assert(self.registration_count.read() == 0, errors::REGISTRATION_CLOSED);
+            self.float_token.write(token);
+            self.emit(FloatTokenSet { token });
+        }
+
+        fn get_float_token(self: @ContractState) -> ContractAddress {
+            self.float_token.read()
+        }
+
+        fn checkpoint(ref self: ContractState, commitment: felt252) {
+            assert(!self.closed.read(), errors::ALREADY_CLOSED);
+            assert(self.float_token.read().is_non_zero(), errors::NO_FLOAT);
+            let strategy = self.strategies.read(commitment);
+            assert(strategy.registered, errors::UNREGISTERED);
+            let float = self.float_token.read();
+            let registrant = strategy.registrant;
+            let token = IPrizeTokenDispatcher { contract_address: float };
+            let bal_u256 = token.balance_of(registrant);
+            let bal: u128 = if bal_u256.high != 0 {
+                0xffffffffffffffffffffffffffffffff_u128
+            } else {
+                bal_u256.low
+            };
+            let ts = get_block_timestamp();
+            let count = self.checkpoint_counts.read(commitment);
+            let peak = self.attest_peak.read(commitment);
+            let mut new_peak = peak;
+            if bal > peak {
+                new_peak = bal;
+                self.attest_peak.write(commitment, bal);
+            }
+            let cur_dd: u16 = if bal < new_peak {
+                let diff: u256 = (new_peak - bal).into();
+                let mag: u256 = (diff * 10000_u256) / new_peak.into();
+                if mag > 10000_u256 { 10000 } else { mag.low.try_into().unwrap() }
+            } else {
+                0
+            };
+            let stored_max = self.attest_max_dd.read(commitment);
+            if cur_dd > stored_max {
+                self.attest_max_dd.write(commitment, cur_dd);
+            }
+            let mut span_data: Array<felt252> = array![commitment, count.into()];
+            let cp_key = poseidon_hash_span(span_data.span());
+            self.checkpoints.write(cp_key, Checkpoint { balance: bal, timestamp: ts });
+            self.checkpoint_counts.write(commitment, count + 1);
+            self.emit(CheckpointRecorded { commitment, balance: bal, timestamp: ts, index: count });
+        }
+
+        fn get_attest_start(self: @ContractState, commitment: felt252) -> u128 {
+            self.attest_start.read(commitment)
+        }
+
+        fn get_attest_peak(self: @ContractState, commitment: felt252) -> u128 {
+            self.attest_peak.read(commitment)
+        }
+
+        fn get_attest_max_dd(self: @ContractState, commitment: felt252) -> u16 {
+            self.attest_max_dd.read(commitment)
+        }
+
+        fn get_checkpoint_count(self: @ContractState, commitment: felt252) -> u32 {
+            self.checkpoint_counts.read(commitment)
+        }
+
+        fn get_checkpoint(self: @ContractState, commitment: felt252, index: u32) -> (u128, u64) {
+            let mut span_data: Array<felt252> = array![commitment, index.into()];
+            let cp_key = poseidon_hash_span(span_data.span());
+            let cp = self.checkpoints.read(cp_key);
+            (cp.balance, cp.timestamp)
+        }
+
         fn register_strategy(ref self: ContractState, commitment: felt252) {
             assert(get_block_timestamp() < self.start_time.read(), errors::REGISTRATION_CLOSED);
             let existing = self.strategies.read(commitment);
@@ -465,6 +582,20 @@ pub mod Arena {
                 },
             );
             self.emit(StrategyRegistered { commitment, registration_order: order, registrant });
+            // Option B: capture starting balance if float_token is set
+            let float = self.float_token.read();
+            if float.is_non_zero() {
+                let token = IPrizeTokenDispatcher { contract_address: float };
+                let bal_u256 = token.balance_of(registrant);
+                let bal: u128 = if bal_u256.high != 0 {
+                    0xffffffffffffffffffffffffffffffff_u128
+                } else {
+                    bal_u256.low
+                };
+                self.attest_start.write(commitment, bal);
+                self.attest_peak.write(commitment, bal);
+                self.attest_max_dd.write(commitment, 0);
+            }
         }
 
         fn get_registrant(self: @ContractState, commitment: felt252) -> ContractAddress {
@@ -742,8 +873,67 @@ pub mod Arena {
 
         fn get_score(self: @ContractState, commitment: felt252) -> ScoreEntry {
             let strategy = self.strategies.read(commitment);
-            // P1-critical: saturating conversion — attacker-controlled values can
-            // no longer panic scoring (close() DoS eliminated).
+            let float = self.float_token.read();
+            if float.is_non_zero() {
+                let start = self.attest_start.read(commitment);
+                if start.is_non_zero() {
+                    let token = IPrizeTokenDispatcher { contract_address: float };
+                    let bal_u256 = token.balance_of(strategy.registrant);
+                    let current: u128 = if bal_u256.high != 0 {
+                        0xffffffffffffffffffffffffffffffff_u128
+                    } else {
+                        bal_u256.low
+                    };
+                    let return_bps = clamped_return_bps(current, start);
+                    let peak_stored = self.attest_peak.read(commitment);
+                    let mut effective_peak = start;
+                    if peak_stored > effective_peak {
+                        effective_peak = peak_stored;
+                    }
+                    if current > effective_peak {
+                        effective_peak = current;
+                    }
+                    let cur_dd: u16 = if current < effective_peak {
+                        let diff: u256 = (effective_peak - current).into();
+                        let mag: u256 = (diff * 10000_u256) / effective_peak.into();
+                        if mag > 10000_u256 { 10000 } else { mag.low.try_into().unwrap() }
+                    } else {
+                        0
+                    };
+                    let stored_max = self.attest_max_dd.read(commitment);
+                    let max_dd = if cur_dd > stored_max { cur_dd } else { stored_max };
+                    let eligible = strategy.registered && max_dd <= self.max_drawdown_bps.read();
+                    let score_bps = if eligible { return_bps - max_dd.into() } else { 0 };
+                    return ScoreEntry {
+                        commitment,
+                        final_value: current,
+                        return_bps,
+                        max_drawdown_bps: max_dd,
+                        eligible,
+                        score_bps,
+                        registration_order: strategy.registration_order,
+                    };
+                } else {
+                    // float set but start zero => recorded but ineligible (division guard)
+                    let token = IPrizeTokenDispatcher { contract_address: float };
+                    let bal_u256 = token.balance_of(strategy.registrant);
+                    let current: u128 = if bal_u256.high != 0 {
+                        0xffffffffffffffffffffffffffffffff_u128
+                    } else {
+                        bal_u256.low
+                    };
+                    return ScoreEntry {
+                        commitment,
+                        final_value: current,
+                        return_bps: -10000,
+                        max_drawdown_bps: 0,
+                        eligible: false,
+                        score_bps: 0,
+                        registration_order: strategy.registration_order,
+                    };
+                }
+            }
+            // legacy path
             let return_bps = clamped_return_bps(strategy.current_value, self.starting_units.read());
             let eligible = strategy.registered && strategy.max_drawdown_bps <= self.max_drawdown_bps.read();
             let score_bps = if eligible { return_bps - strategy.max_drawdown_bps.into() } else { 0 };
