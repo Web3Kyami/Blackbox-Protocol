@@ -9,7 +9,7 @@ const estimateButton = document.querySelector("#estimate-fees");
 const deployButton = document.querySelector("#deploy-protocol");
 const log = document.querySelector("#deployment-log");
 const status = document.querySelector("#deployment-status");
-let wallets = []; let account; let config; let artifacts;
+let wallets = []; let account; let connectedWallet; let config; let artifacts;
 const progressKey = "blackbox:mainnet-demo:deployment-progress:v1";
 let progress = JSON.parse(localStorage.getItem(progressKey) ?? "{}");
 const write = (message) => { log.textContent += `${message}\n`; };
@@ -50,6 +50,22 @@ async function load() {
 
 function chosenWallet() { return wallets.find((wallet) => wallet.features?.["starknet:walletApi"]?.request) ?? wallets[0]; }
 
+// Ready X's reference dapp uses this raw Wallet API request rather than the
+// WalletAccount declaration helper. Keep this shape identical to the public
+// wallet_addDeclareTransaction specification: the extension owns fee pricing,
+// review, signing, and broadcast.
+async function requestWalletDeclaration(payload) {
+  const request = connectedWallet?.features?.["starknet:walletApi"]?.request;
+  if (typeof request !== "function") throw new Error("The connected wallet does not expose the declaration request API.");
+  return request({
+    type: "wallet_addDeclareTransaction",
+    params: {
+      contract_class: payload.contract,
+      compiled_class_hash: hash.computeCompiledClassHash(payload.casm),
+    },
+  });
+}
+
 function saveProgress() { localStorage.setItem(progressKey, JSON.stringify(progress)); }
 
 function nextStep() {
@@ -75,6 +91,7 @@ connectButton.addEventListener("click", async () => {
   try {
     connectButton.disabled = true; setStatus("Connecting wallet…");
     account = await WalletAccountV6.connect(provider, wallet);
+    connectedWallet = wallet;
     const chain = normal(await walletV6.requestChainId(wallet));
     document.querySelector("#owner-address").textContent = shortHex(account.address);
     document.querySelector("#owner-network").textContent = chain === MAINNET_CHAIN_ID ? "Starknet Mainnet" : "Wrong network";
@@ -112,7 +129,7 @@ deployButton.addEventListener("click", async () => {
       const payload = artifacts[name]; const classHash = normal(hash.computeContractClassHash(payload.contract));
       setStatus(`Ready X is preparing one declaration: ${name}.`);
       try {
-        const declared = await account.declare(payload);
+        const declared = await requestWalletDeclaration(payload);
         await wait(declared.transaction_hash, `${name} declared`);
       } catch (error) {
         if (!/already declared|class already/i.test(walletErrorMessage(error))) throw error;

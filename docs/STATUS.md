@@ -19,6 +19,8 @@
 
 **Ready X declaration-payload correction (Aug 27, 2026):** Ready X showed class details but no fee/confirm state for a declaration. The browser console had forwarded compiler-only `sierra_program_debug_info`. It now forwards the canonical Sierra fields only; independent local class-hash checks confirm the stripped payload has the same class hash while reducing the Gatekeeper payload from 191,737 to 140,608 bytes, the token from 197,520 to 156,834 bytes, and the adapter from 74,612 to 49,240 bytes. `npm run verify` passed after the correction. Mainnet Ready X confirmation remains unverified until the owner tests the new build.
 
+**Ready X request-format correction (Aug 27, 2026):** inspected the owner-provided Ready X reference dapp (`argentlabs/demo-dapp-starknet`). Its Declare view makes a raw `wallet_addDeclareTransaction` Wallet API request and explicitly supplies `hash.computeCompiledClassHash(casm)`. BlackBox had used `WalletAccountV6.declare`, an extra wrapper route. The owner console now matches Ready X's reference request shape for declarations while retaining WalletAccountV6 only for future STRK20 actions. `npm run verify` passed. This must be retested by the owner in Ready X; no mainnet contract transaction has been submitted.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**
