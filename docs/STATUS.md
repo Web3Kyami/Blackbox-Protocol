@@ -21,6 +21,8 @@
 
 **Ready X request-format correction (Aug 27, 2026):** inspected the owner-provided Ready X reference dapp (`argentlabs/demo-dapp-starknet`). Its Declare view makes a raw `wallet_addDeclareTransaction` Wallet API request and explicitly supplies `hash.computeCompiledClassHash(casm)`. BlackBox had used `WalletAccountV6.declare`, an extra wrapper route. The owner console now matches Ready X's reference request shape for declarations while retaining WalletAccountV6 only for future STRK20 actions. `npm run verify` passed. This must be retested by the owner in Ready X; no mainnet contract transaction has been submitted.
 
+**Ready X fallback and reconciliation (Aug 27, 2026):** owner supplied Ready X logs and the public Argent reference dapp. The logs show a standard deployed Ready X account and a 73.286560895985438288 STRK public balance; no private key, seed phrase, or raw signer was used. The owner console now checks each expected public class hash during load. A class declared via a compatible external declaration page is therefore recognized automatically after reload, allowing the remaining deployments to continue without resubmitting it.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**

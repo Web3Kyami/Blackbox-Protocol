@@ -44,6 +44,17 @@ async function load() {
   ]);
   config = loadedConfig.deployment;
   artifacts = Object.fromEntries(["CapabilityGatekeeper", "CapabilityToken", "TreasurySpendAdapter"].map((name, index) => [name, { contract: declarationClass(files[index * 2]), casm: files[index * 2 + 1] }]));
+  const classes = progress.classes ?? (progress.classes = {});
+  for (const [name, payload] of Object.entries(artifacts)) {
+    const classHash = normal(hash.computeContractClassHash(payload.contract));
+    try {
+      await provider.getClassByHash(classHash);
+      classes[name] = classHash;
+    } catch {
+      // Class is not yet declared. The normal deployment step remains available.
+    }
+  }
+  saveProgress();
   document.querySelector("#expiry").textContent = new Date(Number(config.expiresAt) * 1000).toLocaleString();
   document.querySelector("#recipient").textContent = shortHex(config.recipient);
 }
