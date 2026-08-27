@@ -1,0 +1,18 @@
+{
+  "label": "EXAMPLE ONLY — replace every address and verify the live network",
+  "deployment": {
+    "network": "EXAMPLE_ONLY",
+    "privacyPool": "0x111",
+    "issuer": "0x222",
+    "treasury": "0x333",
+    "asset": "0x444",
+    "recipient": "0x555",
+    "capabilityName": "Treasury Payout",
+    "capabilitySymbol": "BB_PAY",
+    "maxAmount": "5000",
+    "expiresAt": "2000000000",
+    "reusable": false,
+    "supply": "1",
+    "treasuryAllowance": "5000"
+  }
+}

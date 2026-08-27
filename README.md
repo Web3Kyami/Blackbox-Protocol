@@ -1,94 +1,206 @@
-# Blackbox Arena
+# BlackBox Protocol
 
-**Prove performance, not the playbook.**
+> **Public rules. Private operators.**
 
-Blackbox Arena lets financial agents prove how well they perform under the same precommitted rules without forcing their builders to reveal complete playbooks. This repository contains a tested executable spec, Cairo Arena + adapter contracts, and two verified judges-visible demos.
+BlackBox is private capability infrastructure for Starknet. A protocol gives an
+operator one bounded job without publishing that operator wallet on a public
+role list. Cairo enforces the public rule; STRK20 carries the bearer pass as a
+private note.
 
-## Live — Sepolia B1 honest round (public RPC, no secrets)
+**Verified locally:** Cairo enforcement and STRK20 RC.2/RC.5 Devnet flow.
+**UNVERIFIED:** mainnet deployment and real extension-wallet execution.
 
-**Demo:** [`https://blackbox-arena.vercel.app/?network=sepolia`](https://blackbox-arena.vercel.app/?network=sepolia)
+![BlackBox landing page](docs/assets/landing.png)
 
-Also works explicitly: `?network=sepolia&arena=0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51&rpcUrl=https://starknet-sepolia-rpc.publicnode.com`
+## The problem
 
-- Reads **B1 arena `0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51`** directly via `https://starknet-sepolia-rpc.publicnode.com` — no Alchemy key, no `127.0.0.1:4174` hardwire, no env secrets (mainnet-ready public RPC mode).
-- Panel shows **Option B attested float**: `float_token 0x02d50cf5…b386`, attest `start 1000 / peak 1000 / maxDD 200 vs 50`, checkpoint poseidon `980/995`, scores `-200 vs -50`, winner **Falcon −50 LEADER**, settlement `100`.
-- Proof that spoofing fails: Tortoise `open_submit_action` inflated `5000` is ACCEPTED on-chain but ignored by `get_score`; winner stays Falcon.
-- Wallet tab → “Join with your own wallet” works over public RPC (no devnet).
+Public role wallets reveal who is authorized and link every action to that
+wallet. BlackBox separates authority from the operator wallet: a protocol
+publishes the exact allowed action, Cairo checks it, and a private pass is used
+to exercise it.
 
-**Network pins (B1, Sepolia):**
+BlackBox does **not** hide the action, target, amount, timing, or deposit edge.
+It is not a private multisig, identity system, or arbitrary-call wallet.
 
-| Entity | Address / Hash | Voyager (sepolia) |
-|---|---|---|
-| Arena (B1) | `0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51` | [contract](https://sepolia.voyager.online/contract/0x52d02e52b71de8bc53efa87b723b9eb53e53b1d08dbf7eb103a9d8d55744f51) |
-| Adapter | `0x42cfafc785c1abeb076c34bcad1e1f698a4e9cf8488a8fbb0ae783acec18c20` | [contract](https://sepolia.voyager.online/contract/0x42cfafc785c1abeb076c34bcad1e1f698a4e9cf8488a8fbb0ae783acec18c20) |
-| Float token (USD mock) | `0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386` | [contract](https://sepolia.voyager.online/contract/0x02d50cf1955c48a1089ae0be3a9d78733e79e667778650277a50945e9818b386) |
-| Arena class | `0x7ca7cd737a3336ff135a53d171feadd78cf36a52b31c93dca14a02f9310e360` | — |
-| Setup tx | `0x350358cf03b93f4679e3c55bdc0370e12c2598ba718089f4ea40743cfe62da2` | [tx](https://sepolia.voyager.online/tx/0x350358cf03b93f4679e3c55bdc0370e12c2598ba718089f4ea40743cfe62da2) |
-| Tortoise action (20 units) | `0x42a2c80a390c27596e07ca9c730b27721ab206851bde7548f0012c1e12e010b` | [tx](https://sepolia.voyager.online/tx/0x42a2c80a390c27596e07ca9c730b27721ab206851bde7548f0012c1e12e010b) |
-| Falcon action (5 units) | `0x65fa868968547f185e640ac3b29f8356b281fedc6f9cecf08cf60669334e529` | [tx](https://sepolia.voyager.online/tx/0x65fa868968547f185e640ac3b29f8356b281fedc6f9cecf08cf60669334e529) |
-| Close (Tortoise, non-sponsor) | `0x39dbbee77f468079df531f7ba9107e56cb92caf2bda298b0e4a7aaeb9a935c` | [tx](https://sepolia.voyager.online/tx/0x39dbbee77f468079df531f7ba9107e56cb92caf2bda298b0e4a7aaeb9a935c) |
-| Settle (Falcon, non-sponsor) | `0x4cfaf5327e40bf0749eca9e1af9fe573bf1f6d3b23dbb4cc578fceccb6e4523` | [tx](https://sepolia.voyager.online/tx/0x4cfaf5327e40bf0749eca9e1af9fe573bf1f6d3b23dbb4cc578fceccb6e4523) |
-| Rules commitment | `0xd4aed48668e3726badf199601b40b27fa9538c33700bc62c3075babe51f9` | on-chain `rules_commitment()` |
+## Flow
 
-Verification (no trusted logs): every hash is `SUCCEEDED` on-chain; independent re-derive via `scripts/open-round-crosscheck-b1.mjs` (33 checks: poseidon checkpoints, live `balance_of`, spoof ignored, winner/settlement/custody zero, every tx sender/mediation). Also `npm run verify` 40/40.
-
-## Run the verified local slice
-
-Requirements: Node.js 22+, WSL Ubuntu / `kyami` for devnet session.
-
-```sh
-npm test
-npm run build
-npm run dev          # http://127.0.0.1:4173 (fixture demo)
-npm run verify       # 40/40 (format/lint/typecheck/40 tests/build/secret)
+```mermaid
+flowchart LR
+  I[Protocol issuer] -->|defines public policy| G[CapabilityGatekeeper]
+  I -->|mints, approves, deposits passes| P[STRK20 pool]
+  P -->|private one-unit pass| H[Holder]
+  H -->|private note use| P
+  P -->|same transaction| G
+  G -->|checks target, selector, cap, expiry| T[Protected target]
+  G -->|burn or returned note| P
 ```
 
-Without `?network=sepolia` the dashboard uses the local devnet session (`127.0.0.1:4174`) and shows “Devnet Active” — same UI, different RPC path. With `?network=sepolia` or `?public=1` it switches to public RPC (no devnet needed, judge-friendly).
+```mermaid
+sequenceDiagram
+  participant H as Holder wallet
+  participant P as STRK20 pool
+  participant G as Gatekeeper
+  participant T as Protected target
+  H->>P: Spend one private capability note
+  P->>G: Deliver token + approved invoke
+  G->>G: Verify fresh delivery and policy
+  G->>T: Execute permitted action
+  alt reusable
+    G-->>P: Return fresh private note
+  else one-shot
+    G->>G: Burn pass
+  end
+```
 
-Full lifecycle on local devnet: `npm run devnet:session` → `http://127.0.0.1:4173` → register/close/settle controls.
+## Product screens
 
-## Case-study result (fixture demo, deterministic)
+| Landing | Holder app |
+|---|---|
+| ![Landing](docs/assets/landing.png) | ![Holder app](docs/assets/holder-app.png) |
 
-| Rank | Strategy | Final value | Return | Max drawdown | Eligible | Score |
-|---:|---|---:|---:|---:|---|---:|
-| 1 | Tortoise | 1,120 | 1,200 bps | 800 bps | yes | **400 bps** |
-| 2 | Falcon | 1,010 | 100 bps | 200 bps | yes | -100 bps |
-| 3 | Pulse | 1,180 | 1,800 bps | 2,500 bps | **no** | not ranked |
+| Documentation | Security |
+|---|---|
+| ![Docs](docs/assets/docs.png) | ![Security](docs/assets/security.png) |
 
-Tortoise wins the fixture. B1 Sepolia live round above uses real token balances and attested float instead of fixture values.
+The holder app shows an honest empty state until a real policy is deployed and
+a private pass is issued to the connected wallet. It never invents a balance or
+fake transaction.
+
+## Public vs private
+
+| Item | Treatment |
+|---|---|
+| Policy target, selector, cap, expiry, mode | Public |
+| Action calldata, timing, and state change | Public |
+| Shield deposit address, token, amount | Public |
+| Wallet receiving private pass | Intended hidden by STRK20 notes |
+| Issue-to-use link | Intended hidden; metadata assumptions apply |
+| Holder in Gatekeeper call | Absent; pool is caller |
+| Transaction sender | Requires relay/outside execution for separation |
+
+Never call shielding private. Browser, wallet, RPC, timing, and network
+metadata are outside the contract guarantee.
 
 ## Architecture
 
-```text
-sealed fixture/action -> deterministic core -> evidence + leaderboard -> static public UI
-                              |
-                              +-> Cairo Arena mirror (compiled 998 lines, tests pending snforge 67)
-                                     ^
-Option B attested float: token balance_of @ register -> checkpoint() -> get_score(balance_of+peak/maxDD)
-STRK20 pool -> privacy_invoke -> ArenaAdapter (per-pool custody, transfer_from) -> Arena.open_submit_action*
-  (* legacy; scorer ignores it when float_token set — spoof proof)
-Public RPC: starknetCall(rpcUrl, arena, selector, calldata) — no devnet daemon
+```mermaid
+flowchart TB
+  W[Holder app + Wallet API] --> P[STRK20 pool]
+  P --> K[CapabilityToken]
+  P --> G[CapabilityGatekeeper]
+  G --> K
+  G --> A[TreasurySpendAdapter]
+  A --> T[Protocol target]
+  G --> P
 ```
 
-The JavaScript core is the executable spec. The Cairo Arena (`0x7ca7cd…10e360`) is the production authority (Option B). See [architecture](docs/ARCHITECTURE.md) for scoring, checkpoints, and value-axis options.
+### Core contracts
 
-## Privacy boundary
+- `CapabilityToken`: one base unit is one pass; records pool-to-Gatekeeper
+  delivery for the current transaction.
+- `CapabilityGatekeeper`: pool-only entrypoint; checks policy, consumes a fresh
+  pass, forwards the approved call, then burns or returns the pass.
+- `TreasurySpendAdapter`: reference target with fixed treasury, asset, and
+  recipient. The holder controls only a capped amount.
 
-Prompts, proprietary code, signal weights stay offchain. Rules, lifecycle, receipts, scores, checkpoint poseidon hashes, and contract state are public. Note-to-note transfers could hide parties; app actions expose amount/timing but not strategy. Adapter pool is custodial until STRK20 privacy pool integration.
+## Use cases
 
-## Trust assumptions (honest list)
+1. Private treasury operator: capped payment to a fixed vendor.
+2. Private keeper: repeatable maintenance call before expiry.
+3. Emergency guardian: short-lived, narrow pause authority.
+4. One-shot mandate: one migration, claim, liquidation, or settlement action.
 
-- **Option B attested float:** score reads `balance_of(float_token, registrant)` at register (start) and at `get_score` (final); intra-round peak/drawdown from permissionless `checkpoint()` snapshots. Wealth outside the single float token is invisible — strategies must be float-constrained; unexplained balance jumps are forfeit under contest rules.
-- **Off-float wealth, LPs, hedge books:** out-of-scope for single-token float; multi-position funds need an oracle design (see `docs/VALUE-AXIS-OPTIONS.md`).
-- **Drawdown completeness:** if nobody calls `checkpoint()` mid-round, only start/end observable — mitigated by permissionless crank + `settle()` checkpoint-count gate (future).
-- **Adapter custodial:** allocation is `allocation_units × price` pulled via `transfer_from` into adapter per-pool custody; withdrawn post-settle. STRK20 pool privacy flow not yet wired.
-- **Sponsor trust:** sponsor sets rules/commitment/price/float_token before start only; cannot edit post-start.
+## Build on it
 
-## Docs map
+### Prerequisites
 
-- [Architecture](docs/ARCHITECTURE.md) — state machine, rules commitment, scoring, adapter, Option B, public RPC.
-- [Value-axis options](docs/VALUE-AXIS-OPTIONS.md) — why Option B was chosen.
-- [Option B reqs](/.verification/option-b-attested-float.req.md) — R1-R10 frozen.
-- [Status / evidence](docs/STATUS.md) — every verified phase, latest is B1 + Vercel.
-- [Handoff](docs/HANDOFF.md) — next task (fuzz + external audit or mainnet funding).
-- Evidence: `.local/open-round-evidence.b1.json`, `.local/open-round-evidence.json` (v5), crosschecks `scripts/open-round-crosscheck*.mjs`.
+- Node.js 22+
+- Scarb 2.17.0 and Starknet Foundry 0.59.0
+- Prepared Starknet Privacy checkout for Devnet E2E
+
+```sh
+npm install
+npm run verify
+npm run dev
+# http://localhost:4173
+```
+
+### Verify the real privacy path
+
+```sh
+npm run verify:capability
+
+# Prepared official RC.5 checkout
+BLACKBOX_PRIVACY_REPO=/absolute/path/to/starknet-privacy npm run verify:capability
+```
+
+The focused E2E deploys a real local STRK20 pool plus BlackBox contracts,
+deposits a pass, exercises reusable and one-shot flows, rediscovers a returned
+note, and checks a relay sender distinct from the holder.
+
+### Integrate a protected operation
+
+1. Put the sensitive operation behind a Gatekeeper-only entrypoint or adapter.
+2. Keep token, treasury, recipient, and semantic limits fixed where possible.
+3. Deploy a token bound to Gatekeeper and privacy pool.
+4. Register target, selector, cap, expiry, and mode as public policy.
+5. Mint passes to issuer, publicly approve/deposit into STRK20, then privately
+   transfer one-unit notes to holders.
+6. Use `@blackbox/capability-sdk`; wallet owns notes, proving, and relay.
+
+See [`packages/capability-sdk/README.md`](packages/capability-sdk/README.md)
+and [`docs/VNEXT_PROTOCOL.md`](docs/VNEXT_PROTOCOL.md) for interfaces.
+
+## Security evidence
+
+| Attempt | Result |
+|---|---|
+| Call outside configured pool | Rejected |
+| Reuse delivery marker | Rejected |
+| Preload pass in earlier transaction | Rejected |
+| Wrong pass amount | Rejected |
+| Wrong target, selector, or cap breach | Rejected |
+| Expired/revoked policy | Rejected |
+| Direct treasury adapter call | Rejected |
+
+`npm run verify` passes. Cairo has **111/111** passing tests, including 19
+capability/adapter tests. See [`docs/TESTING.md`](docs/TESTING.md) and
+[`docs/PRIVACY_MODEL.md`](docs/PRIVACY_MODEL.md) for full evidence.
+
+## Mainnet readiness
+
+```sh
+npm run verify:mainnet-readiness
+```
+
+This read-only command verifies `SN_MAIN` and the expected STRK20 pool class
+hash. It does not sign, deploy, issue a pass, or prove wallet/relayer availability.
+
+Prepare an unsigned public-config-only plan:
+
+```sh
+npm run release:capability -- \
+  --config configs/capability-deployment.example.json \
+  --out dist/capability-release.json
+```
+
+No private key, viewing key, mnemonic, signer, or credential belongs in this
+repository, config, or browser app. Mainnet remains owner-gated.
+
+## Repository map
+
+```text
+contracts/                 Cairo policy, token, and reference adapter
+packages/capability-sdk/   Wallet-neutral policy and Wallet API builders
+packages/devnet-session/   STRK20 Devnet capability E2E
+apps/web/                  Landing, docs, security, and holder app
+docs/                      Protocol, network, testing, and handoff evidence
+configs/                   Public-only deployment configuration example
+```
+
+## Contributing and license
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep authorization contract-owned,
+never expose secrets, and mark untested privacy/network claims `UNVERIFIED`.
+
+[MIT License](LICENSE)

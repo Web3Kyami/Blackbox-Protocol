@@ -4,7 +4,7 @@ import {
   type Account,
   type RpcProvider,
   type GetTransactionReceiptResponse,
-} from "../../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js";
+} from "starknet";
 import {
   repoRoot,
   artifactPair,

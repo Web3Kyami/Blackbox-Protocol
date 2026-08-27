@@ -1,5 +1,35 @@
 # Architecture
 
+> **Prototype architecture:** This file describes the current deployed/tested
+> Arena prototype. [`VNEXT_PROTOCOL.md`](./VNEXT_PROTOCOL.md) defines the
+> replacement protocol architecture. In particular, live transferable wallet
+> balances and mutable winner recomputation are not accepted vNext authority.
+
+The current BlackBox Protocol path is:
+
+```text
+issuer -> CapabilityToken pass -> STRK20 private note
+holder -> same-tx pass delivery + privacy_invoke -> CapabilityGatekeeper
+CapabilityGatekeeper -> exact public policy checks -> protected target
+                     -> burn one-shot pass OR return reusable private note
+```
+
+The holder-facing static app follows the official Wallet API route: it detects
+wallet-standard providers, connects `WalletAccountV6`, builds the exact STRK20
+action array from the public policy, asks the wallet to prepare/simulate, and
+then verifies sender separation after execution. It never receives viewing keys,
+proofs, note plaintext, or private keys. Browser-wallet and mainnet execution
+remain `UNVERIFIED` until a real deployed policy is exercised.
+
+The production-oriented reference target is `TreasurySpendAdapter`: its
+constructor fixes the Gatekeeper, treasury, ERC-20, and recipient, and its only
+action is `spend(amount)`. This makes the Gatekeeper's public first-argument cap
+meaningful. `MockCapabilityTarget` is test scaffolding only.
+
+Its real local STRK20 flow is verified in
+`packages/devnet-session/test/capability-protocol.test.ts`. Everything below is
+retained as legacy Arena architecture and regression evidence.
+
 ## State machine
 
 ```text
@@ -117,7 +147,9 @@ Static `dist/web` is `vercel --prod` of vanilla JS; no `VERCEL_ENV`, no secrets.
 - Sponsor fixes rules before commitment; cannot edit post-start. `set_float_token` / `set_price` / `add_allowed_*` all REVERT after start.
 - Option B attested values are contract-observed but single-token; off-float wealth is trust hole disclosed in README.
 - Settlement pays `min(deposited, prize_cap)` to `get_registrant(winner)`; escrow drained to 0; token mechanics are contract-owned (P4.3+).
-- Real STRK20 pool privacy depends on prover/discovery/relayer/pool config — privacy `UNVERIFIED` beyond adapter shape.
+- The legacy Arena adapter's privacy path has different assumptions. The vNext
+  capability flow is locally verified against the pinned STRK20 pool, prover,
+  and discovery stack; public-network and mainnet behavior remain `UNVERIFIED`.
 - Web is read-only; never fabricates scores (renders “Score unavailable — contract read failed” on RPC failure).
 
 ## Cairo authority now (not UNCOMPILED)

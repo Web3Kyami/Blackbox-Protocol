@@ -2,7 +2,9 @@
 
 ## Dual Verification Gates
 
-Blackbox Arena provides two distinct, documented verification gates:
+BlackBox Protocol provides a fast product gate, Cairo contract gate, and live
+privacy integration gate. Legacy Arena assertions remain in the suites as
+regression evidence.
 
 ### 1. Fast Local Unit & Presentation Gate (`npm run verify`)
 
@@ -14,10 +16,16 @@ Runs fast, hermetic local checks without requiring Devnet to be running:
 - Formatting checks (`scripts/format-check.mjs`)
 - JavaScript syntax and lint checks across core, fixtures, and web code (`scripts/lint`)
 - Public-state runtime type contract validation (`scripts/typecheck.mjs`)
-- **28 Node.js unit tests** (`npm test`) — expanded to **40** across Phases 5–6:
+- Node.js unit and presentation tests (`npm test`), including the legacy Arena
+  suite plus current capability-SDK validation, exact calldata construction,
+  disclosure language, landing-page structure, and the prohibition on browser
+  signing, deployment, or secret handling.
   - 20 core mathematical & contract invariant tests (integer basis points, max drawdown, rule rejection, tie-breakers)
   - 8 frontend dashboard presentation behavior contract tests (`tests/web-dashboard.test.mjs`), proving offline banner rendering, score RPC error handling, empty live evidence behavior, zero fabricated default scores, strategy label mapping, and settlement result parsing.
-  - 6 operator wallet self-service tests: wallet provider detection (Ready/Braavos/generic/absent/broken), commitment normalization (0x-prefix, hex-only, felt252 bounds), register-strategy call construction with exact selector, registrant binding parsing (bound / zero / RPC error / malformed — no fabrication), wallet error mapping (duplicate, closed round, user rejection), and selector constant format.
+  - 6 operator wallet self-service tests: legacy wallet provider handling plus
+    current capability-console feature detection, felt calldata parsing,
+    prepared-action fingerprints, relay separation, and fail-closed wallet
+    error mapping.
   - 6 evidence-completion tests: network label mapping for every surface, explorer URLs only for real networks (Devnet yields null — no fabricated links), receipt tx-reference rendering (hash always, anchor only with explorer, block number when present), canonical rules JSON (recursive key sorting, bigint decimal strings, array order preserved), evidence export payload shape (network label + arena address + rules commitment + exact receipts), and feed rendering with tx references.
 - Production web bundle build (`scripts/build-web.mjs`)
 - Pattern-based secret scan (`scripts/secret-scan.mjs`)
@@ -50,12 +58,25 @@ Executes the tracked integration suite in `packages/devnet-session/test/` agains
    - Round close via `POST /api/devnet/close` (time advance, sponsor role check, on-chain winner derivation $\rightarrow$ `TORTOISE_COMMIT`).
    - Round settlement via `POST /api/devnet/settle` (prize cap $\le 100$, sponsor check, on-chain settlement record verification).
    - Origin security and zero secret exposures.
-4. **E2E Privacy Pipeline (`packages/devnet-session/test/blackbox-arena.test.ts`)**:
+4. **Legacy Arena E2E Privacy Pipeline (`packages/devnet-session/test/blackbox-arena.test.ts`)**:
    - Real STRK20 token mint, approval, and shielded note deposit.
    - Privacy SDK proof construction and `privacy_invoke` routing.
    - On-chain Tortoise scoring derivation (`final_value=1120`, `return_bps=1200`, `max_drawdown_bps=800`, `score_bps=400`).
    - Alice change-note discovery recovering full 1000 USD balance.
    - Falcon oversized allocation rejection and duplicate receipt replay rejection.
+5. **Capability Protocol E2E (`packages/devnet-session/test/capability-protocol.test.ts`)**:
+   - Declares and deploys `CapabilityGatekeeper`, `CapabilityToken`, and a
+     Gatekeeper-protected target against the real local STRK20 pool.
+   - Mints and deposits a one-unit bearer pass as a private note.
+   - Uses one privacy transaction to deliver the pass, invoke the Gatekeeper,
+     enforce the target/selector/first-argument policy, and call the target.
+   - Verifies target state and policy-use count from chain state.
+   - Verifies that a reusable pass returns to the pool and is rediscovered as a
+     one-unit private note.
+   - Deploys a second one-shot class, executes it through the same real pool,
+     verifies total-supply burn, and verifies that no replacement note exists.
+   - Reads the exercise transaction from chain and verifies that its sender is
+     the relay/admin account rather than the holder account.
 
 ---
 
@@ -79,10 +100,18 @@ packages/devnet-session/
     ├── stage-a-session.test.ts
     ├── stage-b-dashboard.test.ts
     ├── stage-c-lifecycle.test.ts
-    └── blackbox-arena.test.ts
+    ├── blackbox-arena.test.ts
+    └── capability-protocol.test.ts
 ```
 
-Latest verified result (2026-08-23, after Phase 4): **4/4 test files and 4/4 tests passed in 108.79 s** under WSL `Ubuntu` user `kyami`. Phase 4 additions covered by the suites: Stage B asserts contract-read registrants for all default commitments; Stage C asserts the settled prize actually moves (exact sponsor balance delta of 100 via artifact-ABI token Contract) and manifest `prizeToken`/`prizeDeposited`; the session funds the escrow (`mint` → `approve` → `deposit_prize(100)`) at setup.
+Latest focused capability result (2026-08-27): **1/1 passed on both RC.2 and
+RC.5** on local Devnet, covering reusable and one-shot passes plus relay-sender
+separation. Run the default pin with `npm run verify:capability`, or set
+`BLACKBOX_PRIVACY_REPO` to a prepared official checkout. The five-file gate then passed four suites and exposed a stale legacy
+`settle(amount)` client call after Cairo settlement had become structural and
+zero-calldata. After removing that false caller authority, the affected Stage C
+suite passed on rerun in 104.57 s. Together, all **5/5** tracked integration
+suites are green on the current code.
 
 Adapter conversion note: the E2E suite exercises `privacy_invoke`, which requires raw delivered tokens to equal `allocation × price` (D011 semantics: price is raw units per allocation unit). A latent inverted formula (`allocation × 10¹⁸ ÷ price`) was corrected in Phase 4; with the pinned `10¹⁸` USD price it had made every shielded action revert `BAD_AMOUNT`.
 
@@ -97,7 +126,9 @@ cd contracts
 scarb build
 snforge test
 ```
-Result: **38/38 contract tests pass** with Scarb 2.17.0 / Sierra 1.9.3 and Starknet Foundry 0.59.0.
+Result: **111/111 contract tests pass** with Scarb 2.17.0 / Sierra 1.9.3 and
+Starknet Foundry 0.59.0. Twelve tests directly cover the capability protocol;
+the other 92 retain legacy Arena regression breadth.
 
 New operator-binding tests (P4.2):
 - `test_registrant_is_bound_at_registration` — permissionless registration binds the caller; distinct registrants recorded.

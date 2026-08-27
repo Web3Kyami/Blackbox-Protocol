@@ -1,383 +1,395 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Blackbox Arena — Deterministic Agent Performance Qualification with STRK20 Privacy Integration.">
-    <title>Blackbox Arena — Dashboard</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="BlackBox gives Starknet protocols public rules and private operators through STRK20 capability passes.">
+    <title>BlackBox — Public rules. Private operators.</title>
+    <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="#top" aria-label="Blackbox Arena home"><span class="brand-mark">B</span> BLACKBOX <em>ARENA</em></a>
-
-      <!-- Top Navigation Tabs -->
-      <nav class="nav-tabs" aria-label="Dashboard Views">
-        <button class="nav-tab active" id="tab-live-btn">Live Devnet Dashboard</button>
-        <button class="nav-tab" id="tab-case-study-btn">Case Study (Deterministic Spec)</button>
+    <header class="site-header">
+      <a class="brand" href="./index.html" aria-label="BlackBox home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>BLACKBOX</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="./use-cases.html">Use cases</a>
+        <a href="./docs.html">Docs</a>
+        <a href="./security.html">Security</a>
       </nav>
-
-      <div class="topbar-controls">
-        <div class="account-selector-wrap">
-          <label for="account-select">Devnet Role:</label>
-          <select id="account-select">
-            <option value="sponsor" selected>Amara (Sponsor / Admin)</option>
-            <option value="alice">Alice (Operator / Strategy Owner)</option>
-            <option value="bob">Bob (Observer / Auditor)</option>
-          </select>
-        </div>
-        <span class="network" id="topbar-network-badge"><i></i> Checking Devnet...</span>
-        <button class="button secondary small" id="wallet-connect-btn" title="Connect a Starknet wallet (Ready/Argent, Braavos) to join as an operator">Connect Wallet</button>
-        <code id="wallet-address-chip" class="status-badge live" style="display: none;" title="Connected operator account"></code>
-      </div>
+      <a class="button button-small button-outline" href="#operator">Use a pass</a>
     </header>
 
     <main id="top">
-      <!-- ═══════════════════════════════════════════════════════════════════ -->
-      <!-- VIEW 1: LIVE DEVNET VIEW -->
-      <!-- ═══════════════════════════════════════════════════════════════════ -->
-      <div id="view-live" class="view-panel active">
-        <!-- Status & Environment Bar -->
-        <section class="env-banner" id="env-banner">
-          <div class="env-info">
-            <div class="env-pill"><span class="pill-label">NETWORK</span><strong id="env-network-label">Local Devnet (0.8.0-rc.3)</strong></div>
-            <div class="env-pill"><span class="pill-label">ARENA ADDRESS</span><code id="env-arena-address" class="code-truncate">Loading...</code></div>
-            <div class="env-pill"><span class="pill-label">ADAPTER</span><span class="status-badge live" id="env-adapter-status">Locked</span></div>
-            <div class="env-pill"><span class="pill-label">BLOCK</span><code id="env-block-number">#...</code></div>
-            <div class="env-pill"><span class="pill-label">RPC</span><code id="env-rpc-url">127.0.0.1:...</code></div>
+      <section class="hero shell">
+        <div class="hero-copy">
+          <div class="eyebrow"><span></span> PRIVATE ACCESS CONTROL ON STARKNET</div>
+          <h1>Public rules.<br><em>Private operators.</em></h1>
+          <p class="hero-lede">
+            Delegate limited onchain authority without exposing the wallets that
+            receive or exercise it. Relayed execution keeps the holder out of
+            Starknet transaction-sender metadata.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#operator">Use a capability</a>
+            <a class="button button-quiet" href="#how-it-works">See how it works <span>↘</span></a>
           </div>
-          <div class="env-actions">
-            <button class="button small secondary" id="refresh-devnet-btn" title="Refresh live contract state from Devnet">Refresh State</button>
-            <button class="button small secondary" id="export-evidence-btn" title="Download current-session receipts as JSON">Export Evidence</button>
-          </div>
-        </section>
-
-        <!-- Disconnected Warning Banner (Hidden when connected) -->
-        <div class="disconnected-banner" id="disconnected-banner" style="display: none;">
-          <div class="dis-icon">&#x26A0;&#xFE0F;</div>
-          <div class="dis-text">
-            <strong>Local Devnet is not running.</strong>
-            <span>Start the local session service with: <code>npm run devnet:session</code></span>
+          <div class="trust-line">
+            <span>Contract-enforced</span><span>Powered by STRK20</span><span>Open source</span>
           </div>
         </div>
 
-        <!-- Dashboard Grid: Live Contract State & Execution -->
-        <section class="dashboard-section" id="live-dashboard-section">
-          <!-- Transaction / Action Status Banner (Dynamically updated) -->
-          <div class="tx-feedback-banner" id="tx-feedback-banner" style="display: none;">
-            <div class="tx-feedback-header">
-              <span class="tx-status-icon" id="tx-feedback-icon">&#x23F3;</span>
-              <strong id="tx-feedback-title">Transaction in progress...</strong>
-              <button class="close-banner-btn" id="tx-feedback-close">&times;</button>
+        <div class="hero-console" aria-label="Example capability policy">
+          <div class="console-topline">
+            <span class="status-dot"></span>
+            <span>CAPABILITY / 001</span>
+            <span class="console-state">ACTIVE</span>
+          </div>
+          <div class="capability-title">
+            <div class="capability-glyph">B</div>
+            <div>
+              <small>ROLE CLASS</small>
+              <strong>Treasury Payout</strong>
             </div>
-            <div class="tx-feedback-body">
-              <p id="tx-feedback-message">Submitting transaction to local Devnet...</p>
-              <div class="tx-details" id="tx-feedback-details" style="display: none;">
-                <div class="tx-detail-row"><span>Tx Hash:</span><code id="tx-feedback-hash">0x...</code></div>
-                <div class="tx-detail-row" id="tx-receipt-row" style="display: none;"><span>Receipt ID:</span><code id="tx-feedback-receipt">...</code></div>
-                <div class="tx-detail-row" id="tx-reason-row" style="display: none;"><span>Result:</span><span id="tx-feedback-reason" class="status-badge live">ACCEPTED</span></div>
+          </div>
+          <dl class="policy-grid">
+            <div><dt>TARGET</dt><dd>Treasury Adapter</dd></div>
+            <div><dt>ACTION</dt><dd>Payout</dd></div>
+            <div><dt>LIMIT</dt><dd>5,000 USDC</dd></div>
+            <div><dt>EXPIRY</dt><dd>30 Sep 2026</dd></div>
+            <div><dt>MODE</dt><dd>Reusable</dd></div>
+            <div><dt>HOLDER</dt><dd class="private-value">PRIVATE</dd></div>
+          </dl>
+          <div class="console-flow">
+            <span>Issue</span><i></i><span>Shield</span><i></i><span>Execute</span><i></i><span>Verify</span>
+          </div>
+          <div class="console-foot">Policy visible · Operator hidden when relayed</div>
+        </div>
+      </section>
+
+      <section class="problem-band" id="product">
+        <div class="shell problem-grid">
+          <div>
+            <div class="section-index">01 / THE PROBLEM</div>
+            <h2>Onchain permissions expose the people behind them.</h2>
+          </div>
+          <div class="problem-copy">
+            <p>
+              Wallet allowlists, multisigs, and public role tokens reveal an
+              organization’s operating graph. Every permission becomes a target,
+              and every action becomes part of the operator’s permanent profile.
+            </p>
+            <ul class="problem-list">
+              <li><span>01</span> Public role holders become security targets.</li>
+              <li><span>02</span> Reused wallets link every operation together.</li>
+              <li><span>03</span> Treasury activity exposes internal relationships.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="how-it-works">
+        <div class="section-heading">
+          <div class="section-index">02 / HOW IT WORKS</div>
+          <h2>Authority without identity exposure.</h2>
+          <p>The contract verifies the permission. STRK20 breaks the public link to its holder.</p>
+        </div>
+        <div class="steps">
+          <article>
+            <span class="step-number">01</span>
+            <h3>Define the rules</h3>
+            <p>Choose the exact target, action, limit, deadline, and whether the pass is one-shot or reusable.</p>
+          </article>
+          <article>
+            <span class="step-number">02</span>
+            <h3>Issue through the pool</h3>
+            <p>Shield the capability supply in a public deposit, then privately transfer one-unit bearer passes to approved operators.</p>
+          </article>
+          <article>
+            <span class="step-number">03</span>
+            <h3>Execute through Gatekeeper</h3>
+            <p>Submit the proof through a relay. The Gatekeeper verifies current delivery and policy constraints before forwarding the call.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section-dark" id="use-cases">
+        <div class="shell">
+          <div class="section-heading heading-row">
+            <div>
+              <div class="section-index">03 / WHO USES BLACKBOX</div>
+              <h2>Built for onchain operations.</h2>
+            </div>
+            <p>One primitive, narrowly applied. The treasury operator is the flagship—not six unfinished products.</p>
+          </div>
+          <div class="use-case-grid">
+            <article class="use-case featured">
+              <div class="case-tag">FLAGSHIP</div>
+              <h3>Treasury operators</h3>
+              <p>Delegate a capped payout to a fixed asset and recipient without publishing the operator wallet.</p>
+              <span>Public action · Private operator</span>
+            </article>
+            <article class="use-case">
+              <div class="case-tag">PROTOCOLS</div>
+              <h3>Protocol keepers</h3>
+              <p>Authorize maintenance selectors without exposing a permanent keeper address list.</p>
+              <span>Auditable execution</span>
+            </article>
+            <article class="use-case">
+              <div class="case-tag">SECURITY</div>
+              <h3>Emergency guardians</h3>
+              <p>Issue short-lived, narrowly scoped pause authority and rotate the class after an incident.</p>
+              <span>Minimal authority</span>
+            </article>
+            <article class="use-case">
+              <div class="case-tag">MANDATES</div>
+              <h3>One-shot execution</h3>
+              <p>Permit one exact or adapted contract operation. The pass burns after successful use.</p>
+              <span>No general wallet control</span>
+            </article>
+            <article class="use-case">
+              <div class="case-tag">COMMUNITIES</div>
+              <h3>BlackBox Voice</h3>
+              <p>Privately issue participation passes for verified anonymous protocol feedback and signalling.</p>
+              <span>Reference module</span>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell builder-section" id="builder">
+        <div class="section-heading heading-row">
+          <div>
+            <div class="section-index">04 / POLICY BUILDER</div>
+            <h2>Describe the authority precisely.</h2>
+          </div>
+          <div class="build-status"><span></span> LOCAL PREVIEW · MAINNET UNVERIFIED</div>
+        </div>
+
+        <div class="builder-layout">
+          <form id="policy-form" class="policy-form">
+            <div class="preset-row" aria-label="Capability templates">
+              <button type="button" class="preset active" data-preset="treasury">Treasury</button>
+              <button type="button" class="preset" data-preset="keeper">Keeper</button>
+              <button type="button" class="preset" data-preset="guardian">Guardian</button>
+              <button type="button" class="preset" data-preset="voice">Voice</button>
+            </div>
+            <label>
+              Capability name
+              <input id="policy-name" value="Treasury Payout" autocomplete="off">
+            </label>
+            <div class="form-pair">
+              <label>
+                Gatekeeper contract
+                <input id="policy-gatekeeper" value="0x100" spellcheck="false">
+              </label>
+              <label>
+                Capability token
+                <input id="policy-token" value="0x200" spellcheck="false">
+              </label>
+            </div>
+            <div class="form-pair">
+              <label>
+                Target contract
+                <input id="policy-target" value="0x300" spellcheck="false">
+              </label>
+              <label>
+                Entrypoint selector
+                <input id="policy-selector" value="0x400" spellcheck="false">
+              </label>
+            </div>
+            <div class="form-pair">
+              <label>
+                First argument limit
+                <input id="policy-limit" type="number" min="0" value="5000">
+              </label>
+              <label>
+                Expires
+                <input id="policy-expiry" type="datetime-local" value="2026-09-30T18:00">
+              </label>
+            </div>
+            <fieldset>
+              <legend>Pass behavior</legend>
+              <label class="radio-card">
+                <input type="radio" name="reuse" value="reusable" checked>
+                <span><strong>Reusable</strong><small>Return a fresh private pass note after success.</small></span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="reuse" value="oneshot">
+                <span><strong>One-shot</strong><small>Burn the pass after one successful action.</small></span>
+              </label>
+            </fieldset>
+            <button class="button button-primary button-wide" type="submit">Generate policy preview</button>
+            <p class="form-note">Preview only. This interface will not sign or deploy without explicit owner approval.</p>
+          </form>
+
+          <div class="policy-preview" aria-live="polite">
+            <div class="preview-header">
+              <div><small>CAPABILITY POLICY</small><strong id="preview-name">Treasury Payout</strong></div>
+              <span id="preview-status">VALID</span>
+            </div>
+            <dl>
+              <div><dt>Target</dt><dd id="preview-target">0x300</dd></div>
+              <div><dt>Selector</dt><dd id="preview-selector">0x400</dd></div>
+              <div><dt>First argument</dt><dd id="preview-limit">≤ 5,000</dd></div>
+              <div><dt>Mode</dt><dd id="preview-mode">Reusable</dd></div>
+              <div><dt>Holder</dt><dd class="private-value">Private</dd></div>
+            </dl>
+            <div class="plain-language">
+              <small>PLAIN-LANGUAGE POLICY</small>
+              <p id="preview-sentence">The holder may call only selector 0x400 on 0x300 with a first argument no greater than 5,000.</p>
+            </div>
+            <details>
+              <summary>Encoded registration call</summary>
+              <pre id="preview-calldata">Generate a valid preview to inspect calldata.</pre>
+            </details>
+            <div id="preview-error" class="preview-error" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-dark operator-section" id="operator">
+        <div class="shell">
+          <div class="section-heading heading-row">
+            <div>
+              <div class="section-index">05 / OPERATOR CONSOLE</div>
+              <h2>Use the permission. Keep the wallet out of the call.</h2>
+            </div>
+            <p>Connect a compatible Starknet privacy wallet, prepare the exact public action, then let the wallet construct the proof and choose its submission path.</p>
+          </div>
+
+          <div class="operator-layout">
+            <div class="operator-panel">
+              <div class="operator-stage">
+                <span>01</span>
+                <div><strong>Connect a privacy wallet</strong><small>BlackBox receives an account address and Wallet API responses—never a viewing key.</small></div>
               </div>
+              <label class="operator-label" for="wallet-select">Detected wallet</label>
+              <div class="wallet-row">
+                <select id="wallet-select" aria-label="Detected Starknet wallets">
+                  <option value="">Detecting wallets…</option>
+                </select>
+                <button id="wallet-connect" class="button button-outline" type="button">Connect</button>
+              </div>
+              <div class="connection-facts">
+                <div><span>ACCOUNT</span><strong id="wallet-account">Not connected</strong></div>
+                <div><span>NETWORK</span><strong id="wallet-network">Unknown</strong></div>
+                <div><span>WALLET API</span><strong id="wallet-api">Unchecked</strong></div>
+              </div>
+              <button id="wallet-switch" class="button button-outline button-wide" type="button" hidden>Switch wallet to Starknet Mainnet</button>
+
+              <div class="operator-stage stage-gap">
+                <span>02</span>
+                <div><strong>Set target calldata</strong><small>The Gatekeeper checks these public values against the policy shown above.</small></div>
+              </div>
+              <label class="operator-label" for="operator-calldata">Comma-separated felts</label>
+              <input id="operator-calldata" value="5000" spellcheck="false" aria-describedby="operator-calldata-help">
+              <small id="operator-calldata-help" class="field-help">Example: <code>5000</code> for <code>spend(amount)</code>. Leave empty for a zero-argument target.</small>
+              <button id="operator-preview" class="button button-outline button-wide" type="button">Preview exact wallet actions</button>
+            </div>
+
+            <div class="operator-panel execution-panel">
+              <div class="operator-stage">
+                <span>03</span>
+                <div><strong>Prepare, then execute</strong><small>Preparation proves and simulates. Execution remains a separate wallet confirmation.</small></div>
+              </div>
+              <div class="execution-state">
+                <span id="operator-status-dot"></span>
+                <div><small>CURRENT STATE</small><strong id="operator-status">WAITING FOR A WALLET</strong></div>
+              </div>
+              <pre id="operator-actions" class="action-preview">Connect a compatible wallet and preview the action list.</pre>
+              <div id="operator-message" class="operator-message">No proof, note plaintext, private key, or viewing key is displayed or stored by this page.</div>
+              <div class="execution-buttons">
+                <button id="operator-prepare" class="button button-outline" type="button" disabled>Prepare + simulate</button>
+                <button id="operator-execute" class="button button-primary" type="button" disabled>Execute through wallet</button>
+              </div>
+              <div id="operator-result" class="operator-result" hidden></div>
+              <p class="operator-boundary">Mainnet only. Example addresses are blocked. Sender privacy is reported as verified only after the submitted transaction sender differs from the connected holder.</p>
             </div>
           </div>
+        </div>
+      </section>
 
-          <!-- Winner Settlement Banner (Visible when closed/settled) -->
-          <div class="settlement-banner" id="live-settlement-banner" style="display: none;">
-            <div class="settlement-trophy">&#x1F3C6;</div>
-            <div class="settlement-content">
-              <div class="settlement-badge" id="settlement-status-tag">ROUND SETTLED</div>
-              <h3 id="settlement-winner-label">Winner: Tortoise</h3>
-              <p id="settlement-payout-text">Contract-verified settlement payout: <strong>100 USD units</strong></p>
-            </div>
+      <section class="section privacy-section" id="privacy">
+        <div class="shell">
+          <div class="section-heading">
+            <div class="section-index">06 / PRIVACY, PRECISELY</div>
+            <h2>We hide the operator—not the public action.</h2>
           </div>
-
-          <div class="dashboard-grid">
-
-            <!-- Left Column: Arena Contract State & Controls -->
-            <div class="controls-column">
-
-              <!-- Panel 1: Live Arena Lifecycle & Contract Addresses -->
-              <article class="panel">
-                <div class="panel-heading">
-                  <span>1. CONTRACT STATE &amp; LIFECYCLE</span>
-                  <small id="lifecycle-tag">Contract-Verified</small>
-                </div>
-                <div class="panel-body">
-                  <div class="contract-addresses-list">
-                    <div class="addr-row">
-                      <span>Arena Contract:</span>
-                      <code id="live-arena-addr" class="code-truncate">Loading...</code>
-                    </div>
-                    <div class="addr-row">
-                      <span>Action Adapter:</span>
-                      <code id="live-adapter-addr" class="code-truncate">Loading...</code>
-                    </div>
-                    <div class="addr-row">
-                      <span>Privacy Pool:</span>
-                      <code id="live-privacy-addr" class="code-truncate">Loading...</code>
-                    </div>
-                    <div class="addr-row">
-                      <span>Test USD Token:</span>
-                      <code id="live-usd-addr" class="code-truncate">Loading...</code>
-                    </div>
-                    <div class="addr-row">
-                      <span>Rules Commitment:</span>
-                      <code id="live-rules-commit" class="code-truncate">0x52554c45535f5631</code>
-                    </div>
-                    <div class="addr-row">
-                      <span>Round Status:</span>
-                      <span id="live-round-status" class="status-badge live">Active</span>
-                    </div>
-                  </div>
-
-                  <!-- Local rules-commitment verification instructions -->
-                  <details class="verify-details">
-                    <summary>Verify rules commitment locally</summary>
-                    <p class="panel-hint">The on-chain value is <code>sha256(canonical JSON)</code> truncated to 31 bytes. Canonical form: recursively key-sorted object members, arrays keep order, integers as decimal strings. Round parameters are listed below; reference implementation: <code>packages/core/src/arena.mjs::commitRules()</code>.</p>
-                    <pre id="rules-params-json" class="rules-json">{}</pre>
-                  </details>
-
-                  <!-- Sponsor Lifecycle Controls (Stage C) -->
-                  <div class="lifecycle-controls">
-                    <div class="control-header-sub">
-                      <strong>Sponsor Controls (Amara / Admin)</strong>
-                      <small class="session-administered-tag">session-administered &middot; local devnet only</small>
-                    </div>
-                    <div class="action-btn-group">
-                      <button class="button secondary small" id="stage-c-close-btn" title="Close the active round (requires Sponsor role)">Close Round</button>
-                      <div class="settle-input-wrap">
-                        <input type="number" id="settle-amount-input" min="1" max="100" value="100" title="Prize units to settle (max 100)" placeholder="Units">
-                        <button class="button primary small" id="stage-c-settle-btn" title="Settle the closed round with winner prize payout">Settle Winner</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <!-- Panel 2: Registered Strategies & Registration Control -->
-              <article class="panel">
-                <div class="panel-heading">
-                  <span>2. REGISTER STRATEGY</span>
-                  <small>Arena.register_strategy</small>
-                </div>
-                <div class="panel-body">
-                  <p class="panel-hint">Registered strategy commitments on-chain. Private prompts and code remain off-chain.</p>
-                  <div class="registered-list" id="live-registered-list">
-                    <div class="loading-placeholder">Querying registered commitments...</div>
-                  </div>
-
-                  <!-- Strategy Registration Form (Stage C) -->
-                  <div class="form-section">
-                    <label for="reg-commitment-input">Register Strategy Commitment (Sponsor Role):</label>
-                    <div class="input-with-button">
-                      <input type="text" id="reg-commitment-input" placeholder="0x..." value="0x53545241544547595f4e4557">
-                      <button class="button secondary small" id="register-strategy-btn">Register</button>
-                    </div>
-                  </div>
-
-                  <!-- Operator Self-Service Registration (Wallet) -->
-                  <div class="form-section">
-                    <label for="self-reg-commitment-input">Join With Your Own Wallet (Operator):</label>
-                    <div class="input-with-button">
-                      <input type="text" id="self-reg-commitment-input" placeholder="0x your secret commitment...">
-                      <button class="button primary small" id="self-register-btn">Sign &amp; Register</button>
-                    </div>
-                    <small id="self-reg-status" class="panel-hint">Registration is permissionless before round start. Your connected account is bound on-chain as the registrant (prize recipient). No keys or prompts leave your wallet.</small>
-                  </div>
-                </div>
-              </article>
-
-              <!-- Panel 3: Privacy Route & Shielded Action Invocation -->
-              <article class="panel">
-                <div class="panel-heading">
-                  <span>3. SUBMIT SHIELDED ACTION</span>
-                  <small>STRK20 Privacy Pool &rarr; ArenaAdapter</small>
-                </div>
-                <div class="panel-body">
-                  <div class="shield-notice">
-                    <strong>&#x26A0;&#xFE0F; Shielding Notice:</strong> Depositing address, asset, and input amount are public during pool entry. In-flight action is shielded.
-                  </div>
-
-                  <div class="route-pipeline">
-                    <div class="pipe-step"><span class="pipe-num">1</span> Shielded Note</div>
-                    <div class="pipe-arrow">&rarr;</div>
-                    <div class="pipe-step"><span class="pipe-num">2</span> Privacy Pool</div>
-                    <div class="pipe-arrow">&rarr;</div>
-                    <div class="pipe-step"><span class="pipe-num">3</span> ArenaAdapter</div>
-                    <div class="pipe-arrow">&rarr;</div>
-                    <div class="pipe-step"><span class="pipe-num">4</span> Arena</div>
-                  </div>
-
-                  <!-- Shielded Action Form (Stage C) -->
-                  <div class="action-form-section">
-                    <div class="preset-pills">
-                      <span class="pill-label">Presets:</span>
-                      <button class="pill-btn active" id="preset-tortoise-btn">Tortoise (Valid 350u)</button>
-                      <button class="pill-btn" id="preset-falcon-btn">Falcon (Oversized 700u)</button>
-                      <button class="pill-btn" id="preset-replay-btn">Replay Last</button>
-                    </div>
-
-                    <div class="form-grid">
-                      <div class="form-field">
-                        <label for="action-strat-select">Strategy:</label>
-                        <select id="action-strat-select">
-                          <option value="0x544f52544f4953455f434f4d4d4954">Tortoise</option>
-                          <option value="0x46414c434f4e5f434f4d4d4954">Falcon</option>
-                          <option value="0x50554c53455f434f4d4d4954">Pulse</option>
-                        </select>
-                      </div>
-
-                      <div class="form-field">
-                        <label for="action-units-input">Allocation (Units):</label>
-                        <input type="number" id="action-units-input" value="350" min="1" max="1000">
-                      </div>
-
-                      <div class="form-field">
-                        <label for="action-val-after-input">Portfolio After:</label>
-                        <input type="number" id="action-val-after-input" value="1120" min="1">
-                      </div>
-
-                      <div class="form-field">
-                        <label for="action-dd-input">Drawdown (BPS):</label>
-                        <input type="number" id="action-dd-input" value="800" min="0" max="10000">
-                      </div>
-                    </div>
-
-                    <button class="button primary action-submit-btn" id="submit-shielded-action-btn">
-                      Submit Shielded Action (Alice Operator)
-                    </button>
-                  </div>
-                </div>
-              </article>
-
-            </div>
-
-            <!-- Right Column: Live On-Chain Leaderboard & Evidence -->
-            <div class="results-column">
-
-              <!-- Panel 4: On-Chain Leaderboard & Scored State -->
-              <article class="panel leaderboard-panel">
-                <div class="panel-heading">
-                  <span>CONTRACT-OWNED LEADERBOARD</span>
-                  <small>Source: <code>IArena.get_score(commitment)</code> &middot; <span data-network-label="devnet">LOCAL DEVNET</span></small>
-                </div>
-                <div class="leaderboard-table-wrap">
-                  <div id="live-leaderboard" class="leaderboard" aria-live="polite">
-                    <div class="loading-placeholder">Fetching on-chain scores from Devnet...</div>
-                  </div>
-                </div>
-              </article>
-
-              <!-- Panel 5: Verified On-Chain Assertions Feed -->
-              <article class="panel feed-panel">
-                <div class="panel-heading">
-                  <span>VERIFIED DEVNET EVIDENCE</span>
-                  <small>Current-Session Receipts &middot; <span data-network-label="devnet">LOCAL DEVNET</span></small>
-                </div>
-                <div id="live-feed" class="feed">
-                  <!-- Evidence Rows Injected via JS -->
-                </div>
-              </article>
-
-              <!-- Panel 6: Privacy Boundaries -->
-              <article class="panel privacy-panel">
-                <div class="panel-heading">
-                  <span>SECURITY &amp; PRIVACY BOUNDARIES</span>
-                  <small>ZK &amp; On-Chain Verification</small>
-                </div>
-                <div class="privacy-notes-grid">
-                  <div class="p-note">
-                    <strong class="green-text">&#x2713; Kept Off-Chain</strong>
-                    <p>Prompts, private weights, trading signals, and proprietary algorithms.</p>
-                  </div>
-                  <div class="p-note">
-                    <strong class="blue-text">&#x25CE; On-Chain State</strong>
-                    <p>Rules commitment, action receipts, scores, drawdown, and winner derivation.</p>
-                  </div>
-                  <div class="p-note">
-                    <strong class="orange-text">&#x26A0; STRK20 Shielding</strong>
-                    <p>Depositing address and amount are public. In-flight execution is shielded.</p>
-                  </div>
-                </div>
-              </article>
-
-            </div>
+          <div class="privacy-grid">
+            <article class="privacy-card hidden-card">
+              <h3><span>●</span> Hidden</h3>
+              <ul id="hidden-list">
+                <li>Holder wallet from the Gatekeeper call and, when relayed, transaction sender</li>
+                <li>Recipient of the private pass transfer</li>
+                <li>Issuance-to-use link, subject to STRK20 assumptions</li>
+                <li>Owner of the returned open note</li>
+              </ul>
+            </article>
+            <article class="privacy-card public-card">
+              <h3><span>●</span> Public</h3>
+              <ul id="public-list">
+                <li>Capability token and policy class</li>
+                <li>Target, selector, calldata, and timing</li>
+                <li>Public target state changes</li>
+                <li>Returned open-note token and amount</li>
+              </ul>
+            </article>
           </div>
-        </section>
-      </div>
-
-      <!-- ═══════════════════════════════════════════════════════════════════ -->
-      <!-- VIEW 2: CASE STUDY (DETERMINISTIC REFERENCE SPECIFICATION) -->
-      <!-- ═══════════════════════════════════════════════════════════════════ -->
-      <div id="view-case-study" class="view-panel" style="display: none;">
-        <section class="env-banner">
-          <div class="env-info">
-            <div class="env-pill"><span class="pill-label">VIEW</span><strong>Simulated Case Study</strong></div>
-            <div class="env-pill"><span class="pill-label">MODE</span><span>Read-Only Specification Reference</span></div>
-            <div class="env-pill"><span class="pill-label">DATA</span><span class="status-badge settled">SIMULATED &mdash; not a live network</span></div>
-            <div class="env-pill"><span class="pill-label">STATUS</span><span class="status-badge settled">SETTLED</span></div>
-            <div class="env-pill"><span class="pill-label">WINNER</span><strong class="green-text">Tortoise (400 BPS)</strong></div>
+          <div class="privacy-warning">
+            <strong>Honest boundary</strong>
+            <p>The initial shield deposit address, token, and amount are public. Direct proof submission exposes the submitting wallet, so operator privacy requires relayed outside execution. Each pass is a transferable bearer capability, not proof of human identity. Browser, RPC, wallet, and network metadata remain outside the contract guarantee.</p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="dashboard-section">
-          <div class="dashboard-grid">
-            <div class="controls-column">
-              <article class="panel">
-                <div class="panel-heading">
-                  <span>CASE STUDY SPECIFICATION</span>
-                  <small>Immutable Rules</small>
-                </div>
-                <div class="panel-body">
-                  <div class="mini-rule-grid" id="case-study-rules-grid">
-                    <!-- Injected via JS -->
-                  </div>
-                  <div class="spec-narrative">
-                    <h4>Qualification Protocol Overview</h4>
-                    <p>Three entrant strategies were evaluated against identical starting parameters (1,000 units, 35% max allocation, 20% max drawdown limit):</p>
-                    <ul>
-                      <li><strong>Falcon:</strong> Oversized action (700 units &gt; 350 max) deterministically rejected. Final value: 1,000.</li>
-                      <li><strong>Pulse:</strong> Highest raw final value (1,180 units) but breached drawdown limit (2,500 bps &gt; 2,000 bps max) &rarr; Disqualified.</li>
-                      <li><strong>Tortoise:</strong> Disciplined execution within limits (+1,200 return bps &minus; 800 drawdown bps = 400 score bps) &rarr; <strong>Derived Winner</strong>.</li>
-                    </ul>
-                  </div>
-                </div>
-              </article>
-            </div>
-
-            <div class="results-column">
-              <article class="panel leaderboard-panel">
-                <div class="panel-heading">
-                  <span>REFERENCE SPECIFICATION LEADERBOARD</span>
-                  <small>Deterministic Scorer Hierarchy</small>
-                </div>
-                <div class="leaderboard-table-wrap">
-                  <div id="case-study-leaderboard" class="leaderboard">
-                    <!-- Injected via JS -->
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel feed-panel">
-                <div class="panel-heading">
-                  <span>VERIFIED SPECIFICATION RECEIPTS</span>
-                  <small>Reference Action Feed</small>
-                </div>
-                <div id="case-study-feed" class="feed">
-                  <!-- Injected via JS -->
-                </div>
-              </article>
-            </div>
+      <section class="section shell developer-section" id="developers">
+        <div class="developer-copy">
+          <div class="section-index">07 / FOR BUILDERS</div>
+          <h2>Add private permissions to a Starknet contract.</h2>
+          <p>Integrate the Gatekeeper, register a narrow policy, and compose the STRK20 withdrawal and invoke through the open-source SDK.</p>
+          <div class="developer-links">
+            <a href="https://github.com/starkware-libs/starknet-privacy" rel="noreferrer">STRK20 source ↗</a>
+            <a href="./protocol.md">Protocol specification ↗</a>
           </div>
-        </section>
-      </div>
+        </div>
+        <pre class="code-card"><code><span>const</span> actions = buildWalletApiCapabilityActions({
+  policy,
+  targetCalldata: [amount],
+  holderAddress: wallet.address,
+});
 
+<span>await</span> wallet.strk20PrepareInvoke(actions, true);
+<span>await</span> wallet.strk20InvokeTransaction(actions);
+
+<span>// Wallet owns notes, proof, and relay.</span>
+<span>// BlackBox never receives a viewing key.</span></code></pre>
+      </section>
+
+      <section class="final-cta">
+        <div class="shell">
+          <div class="section-index">BLACKBOX PROTOCOL</div>
+          <h2>Your protocol needs operators.<br>It does not need to publish them.</h2>
+          <a class="button button-primary" href="#operator">Use a capability</a>
+        </div>
+      </section>
     </main>
 
-    <footer>
-      <span>BLACKBOX ARENA &middot; STRK20 INTEGRATION DASHBOARD</span>
-      <span id="footer-status-text">LOCAL DEVNET INTEGRATION &middot; CONTRACT-VERIFIED STATE</span>
+    <footer class="site-footer shell site-footer-expanded">
+      <div class="brand"><span class="brand-mark"></span><span>BLACKBOX</span></div>
+      <div class="footer-links">
+        <a href="./docs.html">Docs</a>
+        <a href="./security.html">Security</a>
+        <a href="#" aria-disabled="true">GitHub · soon</a>
+        <a href="#" aria-disabled="true">X · soon</a>
+        <a href="#" aria-disabled="true">Founder site · soon</a>
+        <a href="#" aria-disabled="true">Contact · soon</a>
+      </div>
+      <p>Open-source private capability infrastructure for Starknet.</p>
+      <span>Local flow verified · Mainnet execution unverified</span>
     </footer>
 
-    <script type="module" src="app.mjs"></script>
+    <script type="module" src="./app.mjs"></script>
   </body>
 </html>

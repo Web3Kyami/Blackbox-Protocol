@@ -75,3 +75,50 @@ Accepted 2026-08-23 after systematic elimination. Verified failures: BlastAPI pu
 **Evidence:** With 2,955 STRK balance and a bounds reserve of only 184 STRK (well within balance arithmetically), the account validator still rejects the declare with `exceed balance`. The validator re-simulates internally with a class-size-dependent surge factor (>16x for this class) that we cannot control or predict. This supersedes the earlier theory that surge was merely a multiplier on reserve — it is a re-simulation cost gate.
 
 **Consequence:** Arena's `submit_action` remains adapter-gated on Sepolia; agents cannot submit actions on-chain there. Agent runtime actions are validated against the deterministic core engine locally. Future options: an `open_submit_action` entrypoint (contract change), or mainnet where gas economics differ.
+
+## D017 — Pivot from agent qualification to private onchain capabilities
+
+Accepted 2026-08-26. BlackBox Arena remains a tested historical prototype, but
+the durable product is BlackBox Protocol: public capability policies with
+privately issued bearer permissions. The first buyer is a crypto protocol, DAO,
+or treasury. Agent evaluation, employee surveys, and generic forms are not the
+primary product. BlackBox Voice remains only a reference use of the capability
+primitive.
+
+## D018 — Bind capability delivery to the current Starknet transaction
+
+Accepted 2026-08-26. A Gatekeeper balance delta or persistent balance is not
+sufficient authorization because tokens can be preloaded in an earlier
+transaction. Each `CapabilityToken` records the transaction hash and amount only
+when the configured privacy pool transfers it to the configured Gatekeeper. The
+Gatekeeper must consume that exact unconsumed marker in the same transaction.
+Local adversarial tests cover stale preload, wrong amount, and replay. The full
+local STRK20 E2E verifies transfer-then-invoke ordering for reusable and
+one-shot passes; public-network and mainnet behavior remain `UNVERIFIED`.
+
+## D019 — Model passes as transferable bearer capabilities
+
+Accepted 2026-08-26. STRK20 notes are transferable, so v1 does not claim a pass
+is permanently bound to a human or wallet. Transfer is explicit delegation of
+authority. Revocation is class-wide; individual private revocation is deferred
+until it can be implemented without inventing an identity or confidential-proof
+primitive that STRK20 does not ship.
+
+## D020 — Control protocol entrypoints, not arbitrary personal wallets
+
+Accepted 2026-08-26. A protected target grants authority to the Gatekeeper and
+must expose no bypass for the same operation. This provides real access control
+for protocol-owned contracts and vault adapters. BlackBox can constrain private
+funds voluntarily routed through a compatible anonymizer, but cannot prevent a
+normal STRK20 owner from spending through another path. Account-wide private
+permissions are not claimed.
+
+## D021 — Bind semantic treasury constraints in a target adapter
+
+Accepted 2026-08-26. The generic Gatekeeper can safely constrain only an exact
+target, selector, expiry, mode, and optional numeric first argument. It must not
+pretend to understand arbitrary calldata. The flagship payout therefore uses a
+`TreasurySpendAdapter` whose constructor permanently binds the Gatekeeper,
+treasury, ERC-20 asset, and recipient. Its holder-controlled calldata is only
+`spend(amount)`, so the public first-argument maximum has an exact meaning. The
+treasury must separately approve the adapter; direct non-Gatekeeper calls fail.

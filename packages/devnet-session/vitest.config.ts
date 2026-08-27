@@ -3,8 +3,11 @@ import { dirname, join, resolve } from "node:path";
 
 const packageRoot = dirname(fileURLToPath(import.meta.url));
 const arenaRoot = resolve(packageRoot, "../..");
-const e2eRoot = join(arenaRoot, "_research/starknet-privacy/e2e");
-const sdkDist = join(arenaRoot, "_research/starknet-privacy/sdk/dist");
+const privacyRoot = process.env.BLACKBOX_PRIVACY_REPO
+  ? resolve(process.env.BLACKBOX_PRIVACY_REPO)
+  : join(arenaRoot, "_research/starknet-privacy");
+const e2eRoot = join(privacyRoot, "e2e");
+const sdkDist = join(privacyRoot, "sdk/dist");
 
 export default {
   root: e2eRoot,
@@ -14,6 +17,7 @@ export default {
       join(packageRoot, "test/stage-b-dashboard.test.ts"),
       join(packageRoot, "test/stage-c-lifecycle.test.ts"),
       join(packageRoot, "test/blackbox-arena.test.ts"),
+      join(packageRoot, "test/capability-protocol.test.ts"),
     ],
     fileParallelism: false,
     hookTimeout: 120000,

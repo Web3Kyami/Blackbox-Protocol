@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   Account,
@@ -8,8 +8,8 @@ import {
   ec,
   hash,
   type Call,
-  type GetTransactionReceiptResponse,
-} from "../../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js";
+  type SuccessfulTransactionReceiptResponseHelper,
+} from "starknet";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -18,7 +18,9 @@ export function arenaRepoRoot(): string {
 }
 
 export function privacyRepoRoot(): string {
-  return join(__dirname, "../../../_research/starknet-privacy");
+  return process.env.BLACKBOX_PRIVACY_REPO
+    ? resolve(process.env.BLACKBOX_PRIVACY_REPO)
+    : join(__dirname, "../../../_research/starknet-privacy");
 }
 
 export function repoRoot(): string {
@@ -69,7 +71,7 @@ export async function executeAndWait(
   account: Account,
   provider: RpcProvider,
   calls: Call | Call[],
-): Promise<GetTransactionReceiptResponse> {
+): Promise<SuccessfulTransactionReceiptResponseHelper> {
   const tx = await account.execute(calls);
   const receipt = await provider.waitForTransaction(tx.transaction_hash);
   if (!receipt.isSuccess()) {

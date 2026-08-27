@@ -1,30 +1,83 @@
 # Product
 
-## Thesis
+## Positioning
 
-Blackbox Arena is a constrained qualification environment for comparing multiple financial strategies under equal, precommitted rules. The public output is evidence of valid performance, not the underlying recipe.
+> **Public rules. Private operators.**
 
-## Primary user story
+BlackBox is private access control for Starknet. Protocols publish exactly what
+a capability permits, convert its bearer pass into a STRK20 private note through
+a public deposit, and let the holder exercise that authority through relayed
+execution without exposing the wallet behind it as the transaction sender.
 
-Amara, acting for a DAO or agent marketplace, creates a capped and time-bounded qualification Arena. Falcon, Tortoise, and Pulse register opaque strategy-version commitments, receive equal test balances, submit bounded actions, and are scored deterministically. Winning qualifies a strategy for a limited mandate; it does not grant unrestricted treasury control.
+The product is not a private multisig and does not control every action of a
+personal shielded wallet. It protects protocol entrypoints that explicitly make
+the BlackBox Gatekeeper their authority.
 
-## MVP workflow
+## Primary customer
 
-1. Sponsor creates and commits immutable rules.
-2. Strategies register 32-byte opaque commitments before the start.
-3. Every entrant starts with the same integer test balance.
-4. Actions disclose only fields required for validation and scoring.
-5. Deterministic checks accept or reject each receipt with a reason code.
-6. Sponsor closes the Arena after its committed end.
-7. Contract-equivalent scoring calculates return, maximum drawdown, eligibility, and tie-breakers.
-8. Public UI presents rules, evidence, ranking, network labels, and privacy disclosure.
-9. A capped settlement may follow only after the intended STRK20 path is verified.
+Starknet protocols, DAOs, and treasuries that delegate operational authority to
+contributors, keepers, guardians, trading desks, or short-lived contractors.
 
-## Smallest credible vertical slice
+## Flagship job
 
-One Arena, one test asset, one mock execution target, three deterministic commitments, four action receipts, deterministic close and score, and a public result view. This deliberately excludes live trading, LLM scoring, tokenomics, databases, custody, and a generalized marketplace.
+A DAO gives an operator permission to call the included treasury payout adapter
+up to a fixed amount before expiry. The adapter permanently binds the treasury,
+asset, and recipient, so the holder controls only the amount. The payout remains
+publicly auditable; relayed execution keeps the operator wallet out of the call
+and transaction-sender metadata.
 
-## Success measure
+## Product surfaces
 
-A judge understands in 30 seconds that equal rules were fixed in advance, invalid actions are rejected, the highest raw value need not win, and proprietary playbooks are not published.
+- **Administrator tooling:** the unsigned deployment plan, public policy-call
+  builder, and issuer deposit action provide the create, issue, inspect, pause,
+  and rotate workflow. The static web app currently previews policy data; it is
+  not presented as a contract-deployment console.
+- **Holder app:** discover a pass, inspect its limits and disclosure, and execute
+  the permitted action.
+- **Gatekeeper:** contract-owned target, selector, deadline, use-mode, and
+  optional first-argument enforcement.
+- **Capability token:** transaction-bound proof that one pass arrived from the
+  configured STRK20 pool in the current callback.
+- **SDK:** policy validation, invoke encoding, disclosure rendering, and
+  integration helpers without viewing-key custody.
 
+## Reference applications
+
+1. Private treasury operator — flagship and demo.
+2. Private protocol keeper — maintenance calls without a public keeper list.
+3. Emergency guardian — short-lived, narrowly scoped pause authority.
+4. One-shot execution mandate — one exact or adapted contract operation.
+5. BlackBox Voice — verified anonymous signalling for onchain communities.
+
+## Landing-page hierarchy
+
+1. Hero: **Public rules. Private operators.**
+2. Explanation: delegate limited onchain authority without exposing the wallets
+   that receive or exercise it.
+3. Three-step flow: define rules → deposit publicly and transfer privately → act through Gatekeeper.
+4. Flagship capability card and Wallet API transaction demonstration.
+5. Crypto-native use cases.
+6. Exact hidden-versus-public table.
+7. Builder SDK and contract integration.
+8. Security limitations and open-source links.
+
+## Business model
+
+Contracts and the basic SDK remain open source. Paid surfaces can include hosted
+policy management, indexing and discovery, monitoring, risk alerts, simulations,
+audit exports, integrations, support, and enterprise SLAs. The hackathon build
+does not introduce a mandatory protocol fee.
+
+## Success measures
+
+- A user understands the product in one sentence without learning Starknet.
+- A protocol can integrate one protected operation from the README.
+- Allowed actions work; wrong target, selector, amount, expiry, caller, stale
+  delivery, and replay paths fail in tests.
+- A real STRK20 E2E demonstrates private issue and use without claiming the
+  public deposit or public target action is hidden.
+- The code is useful as infrastructure beyond the reference interface.
+
+The complete protocol and privacy specification is in
+[`VNEXT_PROTOCOL.md`](./VNEXT_PROTOCOL.md). The old Arena dashboard and scoring
+contracts are retained only as a verified prototype and migration reference.

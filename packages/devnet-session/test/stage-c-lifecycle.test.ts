@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { Contract, RpcProvider } from "../../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js";
+import { Contract, RpcProvider } from "starknet";
 import {
   SessionServiceServer,
   type SanitizedSessionManifest,

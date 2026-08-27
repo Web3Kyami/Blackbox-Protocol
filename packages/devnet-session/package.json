@@ -3,15 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Blackbox Arena Devnet Session Service, Sequential Deployment, and Verification Suite",
+  "description": "BlackBox Protocol Devnet integration and legacy Arena verification suite",
   "scripts": {
+    "typecheck": "node ../../_research/starknet-privacy/e2e/node_modules/typescript/bin/tsc --noEmit",
     "test": "vitest run test/",
     "test:stage-a": "vitest run test/stage-a-session.test.ts",
     "test:stage-b": "vitest run test/stage-b-dashboard.test.ts",
-    "test:e2e": "vitest run test/blackbox-arena.test.ts"
+    "test:e2e": "vitest run test/blackbox-arena.test.ts",
+    "test:capability": "node scripts/run-capability-e2e.mjs"
   },
   "dependencies": {
-    "starknet": "10.0.0-beta.6"
+    "starknet": "10.5.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

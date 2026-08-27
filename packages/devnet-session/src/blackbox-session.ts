@@ -3,9 +3,9 @@ import { createHash } from "crypto";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "http";
-import { Contract, hash, type Account, type RpcProvider } from "../../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js";
-import { Devnet } from "../../../_research/starknet-privacy/sdk/dist/testing/index.js";
-import { Open } from "../../../_research/starknet-privacy/sdk/dist/index.js";
+import { Contract, hash, type Account, type RpcProvider } from "starknet";
+import { Devnet } from "@starkware-libs/starknet-privacy-sdk/testing";
+import { Open } from "@starkware-libs/starknet-privacy-sdk";
 import { createE2eTestEnv, type E2eTestEnv } from "./harness.js";
 import { deployTestTokens, type TokenAddresses } from "./vesu-setup.js";
 import {
@@ -502,6 +502,10 @@ export async function setupBlackboxSession(options?: {
       .execute();
 
     const receipt = await devnet.executeOutside(actionCall);
+    if (!receipt.isSuccess()) {
+      throw new Error("Shielded action transaction did not succeed");
+    }
+    const actionTxHash = receipt.transaction_hash;
     await env.indexer.waitForBlock(devnet.url);
 
     // Extract ActionReceipt event from Arena contract
@@ -532,7 +536,7 @@ export async function setupBlackboxSession(options?: {
     // Capture the block reference for the evidence record (defensive, non-blocking)
     let blockNumber: number | undefined;
     try {
-      const txReceipt = await provider.getTransactionReceipt(receipt.transaction_hash);
+      const txReceipt = await provider.getTransactionReceipt(actionTxHash);
       const bn = (txReceipt as any)?.block_number;
       if (bn !== undefined && bn !== null) blockNumber = Number(bn);
     } catch {
@@ -545,14 +549,14 @@ export async function setupBlackboxSession(options?: {
       reasonCode,
       accepted,
       timestamp: new Date().toISOString(),
-      txHash: receipt.transaction_hash,
+      txHash: actionTxHash,
       blockNumber,
     };
 
     recordReceipt(actionReceipt);
 
     return {
-      txHash: receipt.transaction_hash,
+      txHash: actionTxHash,
       receiptId,
       reasonCode,
       accepted,
@@ -607,10 +611,13 @@ export async function setupBlackboxSession(options?: {
   };
 
   const settleRound = async (amountUnits: number | bigint): Promise<{ txHash: string; winner: string; amountUnits: string }> => {
+    // Arena settlement is structural: it pays the funded amount up to the
+    // immutable cap. The HTTP argument is retained only for the legacy client
+    // response/validation contract; it must never become caller authority.
     const tx = await executeAndWait(admin, provider, {
       contractAddress: arenaAddress,
       entrypoint: "settle",
-      calldata: [BigInt(amountUnits)],
+      calldata: [],
     });
 
     let winner = "0x0";

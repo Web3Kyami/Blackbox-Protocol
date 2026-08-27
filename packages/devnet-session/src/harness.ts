@@ -1,17 +1,17 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { constants, hash, type Account } from "../../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.js";
+import { constants, hash, type Account, type RpcProvider } from "starknet";
 import { repoRoot } from "./utils.js";
 import {
   Devnet,
   type DevnetEnvironment,
   ScreeningCallMockProofProvider,
   IndexerDiscoveryProvider,
-} from "../../../_research/starknet-privacy/sdk/dist/testing/index.js";
+} from "@starkware-libs/starknet-privacy-sdk/testing";
 import {
   createPrivateTransfers,
   type PrivateTransfersInterface,
-} from "../../../_research/starknet-privacy/sdk/dist/index.js";
+} from "@starkware-libs/starknet-privacy-sdk";
 import { IndexerClient, type IndexerSpawnConfig } from "./indexer-client.js";
 
 const CONTRACT_CLASS_PATH = join(
@@ -107,6 +107,23 @@ export interface E2eTestEnv {
   indexer: IndexerClient;
 }
 
+/**
+ * The privacy SDK renamed the Devnet RPC field from `provider` to `node` in
+ * RC5. Keep the BlackBox harness compatible with both releases while the
+ * public Wallet API migration is completed.
+ */
+export function getDevnetProvider(env: DevnetEnvironment): RpcProvider {
+  const compatibleEnv = env as DevnetEnvironment & {
+    provider?: RpcProvider;
+    node?: RpcProvider;
+  };
+  const provider = compatibleEnv.node ?? compatibleEnv.provider;
+  if (!provider) {
+    throw new Error("Privacy SDK Devnet environment did not expose an RPC provider");
+  }
+  return provider;
+}
+
 export interface E2eTestEnvConfig {
   indexer?: Partial<IndexerSpawnConfig>;
 }
@@ -116,6 +133,7 @@ export async function createE2eTestEnv(
   config?: E2eTestEnvConfig,
 ): Promise<E2eTestEnv> {
   const env = await devnet.initialize();
+  const provider = getDevnetProvider(env);
   const chainId = constants.StarknetChainId.SN_SEPOLIA;
 
   const indexer = await IndexerClient.spawn({
@@ -132,7 +150,7 @@ export async function createE2eTestEnv(
       account: env.alice,
       viewingKeyProvider: { getViewingKey: async () => BigInt("0xA11CE") },
       provingProvider: new ScreeningCallMockProofProvider(
-        env.provider,
+        provider,
         chainId,
       ),
       discoveryProvider: new IndexerDiscoveryProvider(
@@ -141,12 +159,12 @@ export async function createE2eTestEnv(
       ),
       poolContractAddress: env.privacy.address,
       poolMode: "screening",
-    }),
+    } as Parameters<typeof createPrivateTransfers>[0]),
     bob: createPrivateTransfers({
       account: env.bob,
       viewingKeyProvider: { getViewingKey: async () => BigInt("0xB0B") },
       provingProvider: new ScreeningCallMockProofProvider(
-        env.provider,
+        provider,
         chainId,
       ),
       discoveryProvider: new IndexerDiscoveryProvider(
@@ -155,7 +173,7 @@ export async function createE2eTestEnv(
       ),
       poolContractAddress: env.privacy.address,
       poolMode: "screening",
-    }),
+    } as Parameters<typeof createPrivateTransfers>[0]),
   };
 
   return { devnet, env, transfers, indexer };

@@ -1,6 +1,8 @@
 # Networks and verified sources
 
-Access date: **2026-08-21**. Values are recorded for research and are not automatically enabled in application configuration.
+Initial access date: **2026-08-21**. Mainnet surface rechecked against official
+sources and live read-only RPC on **2026-08-26**. Values are recorded for
+research and are not automatically enabled in application configuration.
 
 ## Source pins
 
@@ -9,6 +11,7 @@ Access date: **2026-08-21**. Values are recorded for research and are not automa
 | [STRK20 Private Sprint](https://github.com/starkience/strk20-hackathon) | `45e280da9c870a32e37ea3feec984f73987d11d3` (`main`) | rules, mainnet Day 0 guide, starter link | official/current at access |
 | [Starknet Privacy](https://github.com/starkware-libs/starknet-privacy) | `36eac4ea88cd8c59dde1493176e16501c6e90328` (`main`) | current architecture and compatibility matrix | official/current at access |
 | Starknet Privacy compatibility checkout | `PRIVACY-0.14.3-RC.2` / `9bfeb8dd35565a2915a0617dff3f649bd5bb891a` | SDK/anonymizer interface inspection | official tag; selected because current main matrix names RC.2 |
+| Starknet Privacy latest release | `PRIVACY-0.14.3-RC.5` / `66e3caae8c0201227a6719696d004e30d90aea65` | current mainnet Wallet/SDK readiness review | official release; BlackBox local capability E2E passed 2026-08-27 |
 | [STRK20 starter kit](https://github.com/Akashneelesh/strk20-starter-kit) | `187fe789dd4f5de14ccb0953abfdb49a26643664` | wallet `strk20InvokeTransaction` and echo adapter pattern | linked by official sprint repo; demo values are not production pins |
 | [Starknet Devnet](https://github.com/starknet-io/starknet-devnet) | `b272b8bc2569a218ad89a162ca090a5eb75aec87` (`main`) | current Devnet source | official/current source; not installed |
 | [Starknet Foundry book](https://foundry-rs.github.io/starknet-foundry/getting-started/installation.html) | live docs accessed 2026-08-21 | install and Scarb requirement | official docs |
@@ -20,15 +23,20 @@ Access date: **2026-08-21**. Values are recorded for research and are not automa
 | Node.js | 24.19.0 | existing `kyami` NVM installation | upstream SDK build and Devnet smoke pass |
 | npm | 11.17.0 | existing `kyami` NVM installation | upstream locked SDK/E2E installs complete |
 | Cairo/Scarb | 2.17.0 | privacy compatibility tag `.tool-versions` and Starkup/asdf | privacy and Blackbox contracts compile |
-| Starknet Foundry | 0.59.0 | privacy compatibility tag `.tool-versions` and Starkup/asdf | Blackbox Cairo tests pass 5/5 |
+| Starknet Foundry | 0.59.0 | privacy compatibility tag `.tool-versions` and Starkup/asdf | Blackbox Cairo tests pass 111/111 |
 | Rust/Cargo | 1.98.0 | existing `kyami` rustup installation | upstream discovery-service release build passes |
-| starknet.js | starter kit 10.4.0 | starter `package.json` | not installed in Blackbox; wallet integration UNVERIFIED |
-| Next.js/React | starter uses Next 16 / React 19 | starter `package.json` | reference only; Blackbox local demo is dependency-free |
-| Privacy SDK/services | `PRIVACY-0.14.3-RC.2` compatibility row | current privacy README | SDK and discovery service build; local smoke passes |
+| starknet.js | 10.5.0 | official Privacy RC.5 E2E lockfile and BlackBox Devnet package | RC.5 local capability E2E passes; browser-wallet integration UNVERIFIED |
+| Browser bundle | `starknet` 10.5.0, wallet discovery 6.0.2, esbuild 0.25.12 | BlackBox `package.json` lockfile | Wallet API console bundles locally; real extension execution `UNVERIFIED` |
+| Privacy SDK/services | `PRIVACY-0.14.3-RC.2` reproducibility pin; RC.5 current release | official privacy repo | capability E2E passes locally on RC.2 and RC.5; mainnet execution `UNVERIFIED` |
 | Privacy contracts | `PRIVACY-0.14.3-RC.0` compatibility target | current privacy README | ephemeral local Devnet smoke deployment passes |
 | Pathfinder | `eqlabs/pathfinder:v0.22.7` | current privacy README | not installed |
 
-Later privacy tags through `PRIVACY-0.14.3-RC.5` exist, but they were not selected because the current main compatibility matrix explicitly says matching RC.2 service/SDK revisions. This should be rechecked immediately before an integration run.
+The default tracked local integration remains pinned to RC.2 for reproducibility.
+The same tracked capability test also passed against a clean official RC.5
+checkout at commit `66e3caae8c0201227a6719696d004e30d90aea65` with its SDK,
+screening pool, discovery service, and Starknet.js 10.5.0. This closes the local
+SDK migration gate. It does not prove wallet availability, hosted relayer
+behavior, or a successful mainnet transaction.
 
 ## Official class hashes from the current compatibility matrix
 
@@ -45,7 +53,12 @@ These are class hashes, **not deployment addresses**.
 - Intended local RPC in upstream examples: `http://127.0.0.1:5050` or E2E-specific `http://localhost:9545/rpc/v0_10`.
 - Upstream tagged SDK README explicitly tests with `starknet-devnet v0.8.0-rc.3`; current Devnet main reports package version 0.9.2 and newer Starknet dependencies. Compatibility must use the tagged E2E requirement first, not arbitrary latest.
 - Upstream Devnet smoke evidence: Devnet 0.8.0-rc.3, 1/1 test passed in 19.61 s on 2026-08-21. Deployment was ephemeral and produced no reusable address set.
-- Blackbox pool, adapter, token, prover, discovery, and anonymizer addresses: `UNVERIFIED / NOT DEPLOYED`.
+- BlackBox capability contracts and the STRK20 pool are deployed ephemerally by
+  the tracked Devnet E2E; addresses change per run. On 2026-08-27, the complete
+  pass deposit → same-transaction delivery → Gatekeeper invoke path passed 1/1
+  on both RC.2 and RC.5 for reusable-note rediscovery and one-shot burn. The E2E
+  also verifies a relay transaction sender distinct from the holder. No
+  reusable public-network address is claimed.
 
 ## Sepolia
 
@@ -85,10 +98,28 @@ Arena/adapter Sepolia addresses: pending round execution. Pool on Sepolia: defer
 
 ## Mainnet
 
-Official sprint Day 0 values at the pinned commit:
+Official sprint Day-0 values, rechecked 2026-08-26:
 
 - chain: `SN_MAIN` (`0x534e5f4d41494e`)
 - public RPC example: `https://rpc.starknet.lava.build`
 - live STRK20 pool: `0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a`
 
-The same guide says mainnet discovery and proving service URLs were not supplied in that document. They remain `UNVERIFIED`; no endpoint will be guessed. These values were not called, and no mainnet action is authorized.
+Read-only RPC returned `SN_MAIN` and class hash
+`0x67dddd89d80fedadc06b6f160798f94800a4a70164e5a24301cd0d6076b554d`
+at that pool address. This verifies address/code presence, not a successful
+BlackBox invocation.
+
+`npm run verify:mainnet-readiness` makes that exact chain-id and class-hash
+check repeatable using the public Lava endpoint, or a supplied
+`BLACKBOX_MAINNET_RPC`. It is read-only and never signs or submits a transaction.
+
+The preferred dapp route is the Starknet Wallet API (wallet API 0.10.3,
+`starknet` 10.4+). A compatible wallet owns viewing keys, discovery, proof
+generation, and rotating-relayer submission, so the app needs no prover URL.
+Wallet support must be detected rather than assumed.
+
+The low-level Privacy SDK route still has no published mainnet proving-service
+URL in the Day-0 guide. RC.5 also requires a hosted discovery indexer for that
+route because its on-chain discovery provider is not exported. No endpoint will
+be guessed. Mainnet deposits are screened and expose depositor, token, and
+amount. No mainnet signing or transaction is authorized.

@@ -1,6 +1,115 @@
 # Status
 
-Last updated: **2026-08-23** — Phases 4–6 VERIFIED (Foundry 38/38, fast gate 40/40, Devnet 4/4). **Phase 7 (Sepolia rehearsal) IN PROGRESS — interrupted mid-deployment for session handoff.**
+## BlackBox Protocol vNext — local product slice (2026-08-27)
+
+**STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**
+
+- The durable goal is BlackBox Protocol: public rules and private operators.
+  Protocols issue bounded one-shot or reusable bearer permissions through
+  STRK20; holders exercise them through a Gatekeeper without putting their
+  wallet in the application call.
+- [`VNEXT_PROTOCOL.md`](./VNEXT_PROTOCOL.md) is authoritative for the buyer,
+  user flows, contract objects, hidden-versus-public boundary, security
+  invariants, case studies, and delivery gates.
+- Added isolated `CapabilityToken`, `CapabilityGatekeeper`, and
+  `TreasurySpendAdapter` Cairo contracts. The adapter binds a fixed treasury,
+  ERC-20, and recipient so the pass holder controls only a capped amount.
+  `MockCapabilityTarget` remains test scaffolding. The verified Arena prototype
+  remains available as legacy regression evidence, but is not the current
+  product.
+- `scarb build` passes with only the pre-existing Adapter V2 `LegacyMap`
+  warnings.
+- Focused GNU Scarb/Foundry run: **19/19 capability and adapter tests pass**, covering
+  reusable open-note return, one-shot burn, current-transaction delivery
+  binding, stale preload rejection, wrong-amount rejection, replay rejection,
+  target/selector/argument constraints, expiry, return-note mode constraints,
+  class revocation and its issuer authorization, pool-only invocation, and
+  Gatekeeper-only delivery consumption, fixed treasury configuration, direct
+  adapter-call rejection, and bounded payout execution. The combined suite is **111/111
+  passing** with no failures.
+- The tracked Devnet capability E2E is **1/1 passing on both the reproducibility
+  pin (Privacy SDK RC.2) and the current RC.5 release**. It deploys the real
+  local STRK20 pool plus BlackBox contracts and exercises both capability modes. The
+  reusable pass changes the protected target, increments policy use count, and
+  returns as a newly discoverable private note. The one-shot pass executes,
+  burns, reduces total supply, and creates no replacement note. The exercise
+  transaction is submitted by the configured relay/admin account and the E2E
+  asserts that its sender is not the holder account.
+- The current-transaction binding uses a capability-token delivery marker keyed
+  to Starknet transaction hash. The official local pool action ordering is now
+  verified; public-network and mainnet behavior remain `UNVERIFIED`.
+- The official mainnet pool address was rechecked via read-only RPC and has
+  deployed class hash `0x67dddd…6b554d`. Current production guidance uses the
+  Wallet API with rotating relayers and privacy SDK RC.5. BlackBox's RC.5 local
+  compatibility is now verified, including Starknet.js 10.5 and the RC.5
+  Devnet `node` provider surface. Browser-wallet support and any mainnet
+  capability use remain `UNVERIFIED`; neither is inferred from the local pass.
+- Added `packages/capability-sdk`, a wallet-neutral plan/calldata builder that
+  never receives signing or viewing keys. SDK tests pass in `npm run verify`.
+- SDK policy flags are strict booleans, so malformed JSON such as
+  `"reusable": "false"` cannot silently become a reusable authority.
+- Added `CONTRIBUTING.md` with the protocol-authority, privacy-claim, secret
+  handling, and verification requirements for third-party extensions.
+- Added a public-config-only deployment planner and release-bundle generator.
+  It hashes the exact capability sources and Sierra/CASM artifacts, orders
+  dependent deployments and setup calls, rejects secret-bearing configuration,
+  and cannot sign or broadcast. Mainnet execution remains owner-gated.
+- The release path now correctly mints passes to the issuer, which must make a
+  public ERC-20 approval and a wallet-owned STRK20 deposit to create private
+  notes before distribution. A direct token mint to the pool is not represented
+  as a private issuance operation.
+- Replaced the public product face with a responsive crypto-native landing page,
+  four use-case presets, live policy/calldata preview, a Wallet API holder
+  console, developer integration surface, and explicit hidden-versus-public
+  disclosures. The holder console discovers wallet-standard providers, blocks
+  example addresses, gates execution to Mainnet, prepares exact STRK20 actions,
+  and checks public sender separation after execution without retaining proofs
+  or private wallet material. Desktop and mobile headless-browser checks had no
+  runtime error or horizontal overflow. A real extension-wallet transaction is
+  still `UNVERIFIED`.
+- The public site now separates the concise landing page from dedicated
+  `/app.html`, `/use-cases.html`, `/docs.html`, and `/security.html` routes.
+  The landing page uses plain-language examples; technical Wallet API and
+  policy-console details remain on the holder app and documentation surfaces.
+  The footer carries transparent placeholders for GitHub, X, founder website,
+  and contact until owner-provided destinations are available.
+- Documentation links now resolve to designed HTML article routes rather than
+  raw Markdown. The holder app is a separate capability dashboard with an
+  honest empty state until a deployed policy issues a private pass; it no longer
+  reuses the marketing landing-page layout or asks ordinary holders for raw
+  calldata.
+- The public footer is now shared across rendered pages: vertical product links
+  plus clearly placeholder GitHub, X, and email icons. Replace those three
+  destinations only after the owner provides the real public URLs.
+- The repository README is now a self-contained open-source handoff with real
+  local product screenshots, Mermaid architecture and holder-flow diagrams,
+  plain-language protocol explanation, integration path, verification evidence,
+  and explicit mainnet limitations.
+- The static web app is deliberately holder-side: it previews public policy but
+  does not claim to deploy or administer capability contracts. Administrator
+  setup is provided through the unsigned release plan and SDK until an
+  owner-approved deployed-policy workflow exists.
+- `npm run verify` passes: formatting, syntax, type checks, Node tests, web
+  build, and secret scan.
+- `npm run verify:capability` is the reproducible focused runner. Setting
+  `BLACKBOX_PRIVACY_REPO` selects a prepared official privacy checkout; without
+  it the runner uses the repository's pinned compatibility checkout.
+- Devnet integration coverage is green across all **5/5** tracked suites. A
+  complete run exposed one stale legacy session call that still supplied an
+  amount to the now-structural, zero-calldata `Arena.settle()` entrypoint; that
+  false caller authority was removed and the corrected Stage C lifecycle passed
+  on rerun, including the exact 100-unit winner balance delta.
+- Passes are explicitly transferable bearer capabilities. v1 has class-wide,
+  not individual-private, revocation.
+- No mainnet signing, declaration, deployment, or transaction was attempted.
+  Mainnet requires explicit owner approval after readiness review.
+- `npm run verify:mainnet-readiness` is the repeatable, read-only mainnet gate:
+  it checks `SN_MAIN` plus the expected STRK20 pool class hash and cannot sign,
+  declare, deploy, or submit a transaction. It passed against the public Lava
+  RPC on 2026-08-27.
+
+Legacy Arena history follows. Its older phase counts and product language are
+retained as evidence and must not be read as current BlackBox Protocol status.
 
 ## Phase 7 exact position (handoff state)
 
@@ -28,7 +137,9 @@ Last updated: **2026-08-23** — Phases 4–6 VERIFIED (Foundry 38/38, fast gate
 ## Real and passing
 
 - Repository structure, documentation, case-study fixture, deterministic Arena engine, evidence projection, score/tie-break logic, and web source.
-- **28/28 local Node.js tests pass with no skips (`npm run verify`)**, including 20 core mathematical & invariant tests and 8 frontend dashboard presentation & settlement behavior contract tests.
+- **All local Node.js test files pass with no skips (`npm run verify`)**, including
+  core mathematical/contract invariants, frontend behavior contracts, SDK action
+  encoding, landing-page claims, and Wallet API operator-console helpers.
 Cairo contracts compile with Scarb 2.17.0 / Sierra 1.9.3; **31/31** Foundry 0.59.0 tests pass with no skips, including multi-asset allowlists, duplicate and authorization rejection, sponsor price setup, stale-price rejection, cross-asset action submission, unknown-asset rejection, and Phase 4 parity breadth (rejected-receipt consumption, post-end/post-close rejection counting, registration time boundary, zero-action neutral scoring). New read-only view `get_action_counts(commitment)` exposes accepted/rejected counters for evidence use.
 - **Phase 4 pre-mainnet product completion is in progress** per `PHASE4-PLAN.md`:
   - P4.1 parity breadth VERIFIED (31/31 Foundry at the time; mapping table in `docs/TESTING.md`); new view `get_action_counts(commitment)`.
@@ -483,4 +594,3 @@ Still open from review: B' spec implementation, dashboard public-RPC mode, fuzz/
 **What remains before mainnet:**
 - External audit: send `docs/AUDIT-BRIEF.md` + freeze manifest to reviewers; collect findings.
 - Ops (RED — needs Kyami explicit approval, DO NOT spend): funded mainnet sponsor wallet + fee budget (~40 STRK declare + 10 STRK round + Already-Declared tolerance) + monitoring + `Class Hash Already Declared` handling. Plan only until approved.
-

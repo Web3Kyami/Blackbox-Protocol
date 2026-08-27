@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "typeRoots": [
+      "../../_research/starknet-privacy/e2e/node_modules/@types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@starkware-libs/starknet-privacy-sdk": [
+        "../../_research/starknet-privacy/sdk/dist/index.d.ts"
+      ],
+      "@starkware-libs/starknet-privacy-sdk/testing": [
+        "../../_research/starknet-privacy/sdk/dist/testing/index.d.ts"
+      ],
+      "starknet": [
+        "../../_research/starknet-privacy/e2e/node_modules/starknet/dist/index.d.ts"
+      ],
+      "vitest": [
+        "../../_research/starknet-privacy/e2e/node_modules/vitest/dist/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
