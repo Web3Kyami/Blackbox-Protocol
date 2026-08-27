@@ -25,6 +25,8 @@
 
 **Wallet-picker and visual polish (Aug 27, 2026):** the deployment console now opens a wallet-selection dialog instead of silently selecting the first detected wallet. It lists detected Starknet Wallet API providers, makes non-compatible providers explicit, and links MetaMask users to MetaMask's official Starknet Snap rather than treating normal EVM MetaMask as a Starknet signer. Non-issuer wallets can connect for compatibility checking but cannot sign the fixed issuer demo. Fixed wallet-card spacing and added the BlackBox favicon. `npm run verify` passed.
 
+**Sierra/toolchain and registration checkpoint (Aug 27, 2026):** the deployed artifacts are built with Scarb 2.17.0 / Cairo 2.17.0 / Sierra 1.8.0, so they are not affected by Starknet's announced deprecation of legacy Sierra versions below 1.5. A successful wallet declaration on Mainnet remains `UNVERIFIED`; this compatibility conclusion is based on the local compiler output, not an on-chain declaration. Starknet Foundry 0.63.0 is not being adopted as a wallet-popup workaround because it changes developer tooling, not the browser Wallet API transaction review. Added root `strk20.json` with the public demo URL and empty, honest transaction/contract lists; these fields will be populated only with succeeded Mainnet evidence. The deployment wallet chooser now keeps Ready X visible even when its extension is not discovered.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**

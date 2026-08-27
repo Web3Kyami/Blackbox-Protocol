@@ -75,22 +75,37 @@ function openWalletPicker() {
   close.addEventListener("click", dismiss); backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
   heading.append(close); panel.append(heading);
   const detected = wallets.filter((wallet) => wallet?.name);
-  for (const wallet of detected) {
+  const ready = detected.find((wallet) => /ready(?:\s*x)?|argent/i.test(wallet.name));
+  const appendWallet = (wallet, label = wallet.name) => {
     const usable = typeof privacyWalletApi(wallet) === "function";
     const choice = document.createElement("button"); choice.type = "button"; choice.className = "wallet-choice";
-    choice.innerHTML = `<div><strong>${wallet.name}</strong><span>${usable ? "Starknet Wallet API detected" : "No Starknet Wallet API detected"}</span></div><em>${usable ? "CONNECT" : "UNSUPPORTED"}</em>`;
+    choice.innerHTML = `<div><strong>${label}</strong><span>${usable ? "Starknet Wallet API detected" : "Unlock or update Ready X, then reload this page."}</span></div><em>${usable ? "CONNECT" : "RELOAD"}</em>`;
     choice.addEventListener("click", async () => {
       if (!usable) return;
       dismiss(); await connectWallet(wallet);
     });
     panel.append(choice);
+  };
+  // Keep Ready X visible even when its extension has not announced itself to
+  // discovery yet. The funded issuer is a Ready X account, so hiding it made
+  // the deployment path look as if that wallet were unsupported.
+  if (ready) appendWallet(ready, "Ready X");
+  else {
+    const readyInstall = document.createElement("a");
+    readyInstall.className = "wallet-choice"; readyInstall.href = "https://chromewebstore.google.com/detail/ready-x/dlcobpjiigpikoobohmabehhmhfoodbb"; readyInstall.target = "_blank"; readyInstall.rel = "noreferrer";
+    readyInstall.innerHTML = "<div><strong>Ready X</strong><span>Unlock Ready X and reload. It will appear here when its Wallet API is available.</span></div><em>OPEN READY ↗</em>";
+    panel.append(readyInstall);
+  }
+  for (const wallet of detected) {
+    if (wallet === ready) continue;
+    appendWallet(wallet);
   }
   const metaMask = document.createElement("a");
   metaMask.className = "wallet-choice"; metaMask.href = "https://snaps.consensys.io/starknet"; metaMask.target = "_blank"; metaMask.rel = "noreferrer";
   metaMask.innerHTML = "<div><strong>MetaMask</strong><span>Install or enable the official Starknet Snap first.</span></div><em>GET SNAP ↗</em>";
   panel.append(metaMask);
   if (!detected.length) {
-    const note = document.createElement("p"); note.textContent = "No Starknet wallets were detected. Unlock Ready X, or install MetaMask’s official Starknet Snap and reload this page."; panel.append(note);
+    const note = document.createElement("p"); note.textContent = "Ready X is listed above. Unlock it and reload this page; MetaMask users need the official Starknet Snap."; panel.append(note);
   }
   backdrop.append(panel); document.body.append(backdrop);
 }
