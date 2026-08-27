@@ -59,7 +59,68 @@ async function load() {
   document.querySelector("#recipient").textContent = shortHex(config.recipient);
 }
 
-function chosenWallet() { return wallets.find((wallet) => wallet.features?.["starknet:walletApi"]?.request) ?? wallets[0]; }
+function privacyWalletApi(wallet) { return wallet?.features?.["starknet:walletApi"]?.request; }
+
+function openWalletPicker() {
+  const backdrop = document.createElement("div");
+  backdrop.className = "wallet-picker-backdrop";
+  const panel = document.createElement("section");
+  panel.className = "wallet-picker";
+  const heading = document.createElement("div");
+  heading.className = "wallet-picker-heading";
+  heading.innerHTML = "<div><h2>Choose a Starknet wallet</h2><p>Only a wallet with Starknet Wallet API support can sign this mainnet deployment.</p></div>";
+  const close = document.createElement("button");
+  close.className = "wallet-picker-close"; close.type = "button"; close.textContent = "×";
+  const dismiss = () => backdrop.remove();
+  close.addEventListener("click", dismiss); backdrop.addEventListener("click", (event) => { if (event.target === backdrop) dismiss(); });
+  heading.append(close); panel.append(heading);
+  const detected = wallets.filter((wallet) => wallet?.name);
+  for (const wallet of detected) {
+    const usable = typeof privacyWalletApi(wallet) === "function";
+    const choice = document.createElement("button"); choice.type = "button"; choice.className = "wallet-choice";
+    choice.innerHTML = `<div><strong>${wallet.name}</strong><span>${usable ? "Starknet Wallet API detected" : "No Starknet Wallet API detected"}</span></div><em>${usable ? "CONNECT" : "UNSUPPORTED"}</em>`;
+    choice.addEventListener("click", async () => {
+      if (!usable) return;
+      dismiss(); await connectWallet(wallet);
+    });
+    panel.append(choice);
+  }
+  const metaMask = document.createElement("a");
+  metaMask.className = "wallet-choice"; metaMask.href = "https://snaps.consensys.io/starknet"; metaMask.target = "_blank"; metaMask.rel = "noreferrer";
+  metaMask.innerHTML = "<div><strong>MetaMask</strong><span>Install or enable the official Starknet Snap first.</span></div><em>GET SNAP ↗</em>";
+  panel.append(metaMask);
+  if (!detected.length) {
+    const note = document.createElement("p"); note.textContent = "No Starknet wallets were detected. Unlock Ready X, or install MetaMask’s official Starknet Snap and reload this page."; panel.append(note);
+  }
+  backdrop.append(panel); document.body.append(backdrop);
+}
+
+async function connectWallet(wallet) {
+  if (typeof privacyWalletApi(wallet) !== "function") throw new Error("This wallet does not expose Starknet Wallet API support.");
+  try {
+    connectButton.disabled = true; setStatus(`Connecting ${wallet.name}…`);
+    account = await WalletAccountV6.connect(provider, wallet);
+    connectedWallet = wallet;
+    const chain = normal(await walletV6.requestChainId(wallet));
+    document.querySelector("#owner-address").textContent = shortHex(account.address);
+    document.querySelector("#owner-network").textContent = chain === MAINNET_CHAIN_ID ? "Starknet Mainnet" : "Wrong network";
+    if (chain !== MAINNET_CHAIN_ID) throw new Error("Switch the wallet to Starknet Mainnet.");
+    if (normal(account.address) !== OWNER) {
+      document.querySelector("#owner-status").textContent = "Connected — not issuer";
+      connectButton.textContent = "Switch wallet";
+      estimateButton.disabled = true; deployButton.disabled = true;
+      setStatus(`${wallet.name} is connected successfully. This address can test wallet discovery, but only the funded issuer address can deploy this fixed mainnet demo.`);
+      return;
+    }
+    document.querySelector("#owner-status").textContent = "Approved issuer";
+    connectButton.textContent = `${wallet.name} connected`;
+    connectButton.disabled = true;
+    estimateButton.disabled = false; renderNextStep();
+  } catch (error) {
+    account = undefined; connectedWallet = undefined;
+    document.querySelector("#owner-status").textContent = "Not ready"; setStatus(walletErrorMessage(error));
+  } finally { if (!account || normal(account.address) !== OWNER) connectButton.disabled = false; }
+}
 
 // Ready X's reference dapp uses this raw Wallet API request rather than the
 // WalletAccount declaration helper. Keep this shape identical to the public
@@ -98,22 +159,7 @@ function renderNextStep() {
   if (account) setStatus(detail);
 }
 connectButton.addEventListener("click", async () => {
-  const wallet = chosenWallet(); if (!wallet) { setStatus("No compatible Starknet wallet detected."); return; }
-  try {
-    connectButton.disabled = true; setStatus("Connecting wallet…");
-    account = await WalletAccountV6.connect(provider, wallet);
-    connectedWallet = wallet;
-    const chain = normal(await walletV6.requestChainId(wallet));
-    document.querySelector("#owner-address").textContent = shortHex(account.address);
-    document.querySelector("#owner-network").textContent = chain === MAINNET_CHAIN_ID ? "Starknet Mainnet" : "Wrong network";
-    if (chain !== MAINNET_CHAIN_ID) throw new Error("Switch the wallet to Starknet Mainnet.");
-    if (normal(account.address) !== OWNER) throw new Error("Connect the funded issuer / treasury wallet for this approved demo.");
-    document.querySelector("#owner-status").textContent = "Approved issuer";
-    connectButton.textContent = "Issuer wallet connected";
-    connectButton.disabled = true;
-    estimateButton.disabled = false; renderNextStep();
-  } catch (error) { document.querySelector("#owner-status").textContent = "Not ready"; setStatus(walletErrorMessage(error)); }
-  finally { if (!account || normal(account.address) !== OWNER) connectButton.disabled = false; }
+  openWalletPicker();
 });
 
 estimateButton.addEventListener("click", async () => {

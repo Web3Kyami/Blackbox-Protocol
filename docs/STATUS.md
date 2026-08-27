@@ -23,6 +23,8 @@
 
 **Ready X fallback and reconciliation (Aug 27, 2026):** owner supplied Ready X logs and the public Argent reference dapp. The logs show a standard deployed Ready X account and a 73.286560895985438288 STRK public balance; no private key, seed phrase, or raw signer was used. The owner console now checks each expected public class hash during load. A class declared via a compatible external declaration page is therefore recognized automatically after reload, allowing the remaining deployments to continue without resubmitting it.
 
+**Wallet-picker and visual polish (Aug 27, 2026):** the deployment console now opens a wallet-selection dialog instead of silently selecting the first detected wallet. It lists detected Starknet Wallet API providers, makes non-compatible providers explicit, and links MetaMask users to MetaMask's official Starknet Snap rather than treating normal EVM MetaMask as a Starknet signer. Non-issuer wallets can connect for compatibility checking but cannot sign the fixed issuer demo. Fixed wallet-card spacing and added the BlackBox favicon. `npm run verify` passed.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**

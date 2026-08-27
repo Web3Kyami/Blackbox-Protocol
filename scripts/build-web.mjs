@@ -24,7 +24,9 @@ for (const page of [
 ]) {
   const path = new URL(page, output);
   const html = await readFile(path, "utf8");
-  await writeFile(path, html.replace("</body>", '<script type="module" src="/footer.mjs"></script></body>'));
+  await writeFile(path, html
+    .replace("</head>", '<link rel="icon" type="image/svg+xml" href="/favicon.svg"></head>')
+    .replace("</body>", '<script type="module" src="/footer.mjs"></script></body>'));
 }
 await cp(
   new URL("../packages/capability-sdk/src/index.mjs", import.meta.url),
