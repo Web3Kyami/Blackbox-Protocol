@@ -15,6 +15,8 @@
 
 **Fee checkpoint (owner wallet estimate, Aug 27, 2026):** declaration subtotal was `71.5246676187947 STRK` (Gatekeeper `28.880783124567653`, CapabilityToken `32.11650085619228`, TreasurySpendAdapter `10.527383638034761`). With the observed 79.9 STRK funding, only about 8.375 STRK remains before the three deployments and setup transaction. **Do not sign deployment at this balance.** Top up only after choosing a safety margin for the still-unestimated deploy/setup transactions. The owner console now visibly locks and relabels the connect control after the expected issuer wallet is accepted.
 
+**Ready X deployment-flow revision (Aug 27, 2026):** owner feedback found the prior automated sequence unsuitable for a large class declaration in the Ready X confirmation UI. The console now uses Ready X's direct declaration request one class at a time, persists only public progress (class hashes, addresses, transaction hash) in browser local storage, and exposes one subsequent wallet confirmation per deploy/setup stage. No relay endpoint, viewing key, signer, or wallet-vendor rule is embedded in the protocol.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**

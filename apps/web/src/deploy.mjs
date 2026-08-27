@@ -10,6 +10,8 @@ const deployButton = document.querySelector("#deploy-protocol");
 const log = document.querySelector("#deployment-log");
 const status = document.querySelector("#deployment-status");
 let wallets = []; let account; let config; let artifacts;
+const progressKey = "blackbox:mainnet-demo:deployment-progress:v1";
+let progress = JSON.parse(localStorage.getItem(progressKey) ?? "{}");
 const write = (message) => { log.textContent += `${message}\n`; };
 const setStatus = (message) => { status.textContent = message; };
 const normal = (address) => `0x${BigInt(address).toString(16)}`;
@@ -35,6 +37,27 @@ async function load() {
 }
 
 function chosenWallet() { return wallets.find((wallet) => wallet.features?.["starknet:walletApi"]?.request) ?? wallets[0]; }
+
+function saveProgress() { localStorage.setItem(progressKey, JSON.stringify(progress)); }
+
+function nextStep() {
+  const classes = progress.classes ?? {};
+  if (!classes.CapabilityGatekeeper) return ["Declare Gatekeeper", "Declare the Gatekeeper class in one Ready X confirmation."];
+  if (!classes.CapabilityToken) return ["Declare Capability Token", "Declare the pass-token class in one Ready X confirmation."];
+  if (!classes.TreasurySpendAdapter) return ["Declare Treasury Adapter", "Declare the fixed treasury-adapter class in one Ready X confirmation."];
+  if (!progress.gatekeeper) return ["Deploy Gatekeeper", "Deploy the Gatekeeper instance in one Ready X confirmation."];
+  if (!progress.adapter) return ["Deploy Treasury Adapter", "Deploy the fixed treasury-adapter instance in one Ready X confirmation."];
+  if (!progress.token) return ["Deploy Capability Token", "Deploy the three-pass capability token in one Ready X confirmation."];
+  if (!progress.setupTransaction) return ["Register policy & mint passes", "Register the policy, approve the fixed 0.03 STRK budget, and mint three passes in one Ready X confirmation."];
+  return ["Deployment complete", "The public contracts are deployed. Keep the addresses below for private pass issuance."];
+}
+
+function renderNextStep() {
+  const [label, detail] = nextStep();
+  deployButton.textContent = label;
+  deployButton.disabled = !account || label === "Deployment complete";
+  if (account) setStatus(detail);
+}
 connectButton.addEventListener("click", async () => {
   const wallet = chosenWallet(); if (!wallet) { setStatus("No compatible Starknet wallet detected."); return; }
   try {
@@ -48,9 +71,9 @@ connectButton.addEventListener("click", async () => {
     document.querySelector("#owner-status").textContent = "Approved issuer";
     connectButton.textContent = "Issuer wallet connected";
     connectButton.disabled = true;
-    estimateButton.disabled = false; deployButton.disabled = false; setStatus("Issuer wallet ready. Estimate first, then deploy when the wallet shows the exact transactions.");
+    estimateButton.disabled = false; renderNextStep();
   } catch (error) { document.querySelector("#owner-status").textContent = "Not ready"; setStatus(walletErrorMessage(error)); }
-  finally { connectButton.disabled = false; }
+  finally { if (!account || normal(account.address) !== OWNER) connectButton.disabled = false; }
 });
 
 estimateButton.addEventListener("click", async () => {
@@ -70,36 +93,44 @@ estimateButton.addEventListener("click", async () => {
 
 deployButton.addEventListener("click", async () => {
   try {
-    deployButton.disabled = true; estimateButton.disabled = true; log.textContent = "";
-    setStatus("Step 1 of 3: declaring contract classes. Approve only wallet prompts that match this page.");
-    const classes = {};
-    for (const [name, payload] of Object.entries(artifacts)) {
-      const declared = await account.declareIfNot(payload);
-      classes[name] = normal(declared.class_hash);
-      if (declared.transaction_hash) await wait(declared.transaction_hash, `${name} declared`);
-      else write(`${name} was already declared: ${classes[name]}`);
+    deployButton.disabled = true; estimateButton.disabled = true;
+    const classes = progress.classes ?? (progress.classes = {});
+    if (!classes.CapabilityGatekeeper || !classes.CapabilityToken || !classes.TreasurySpendAdapter) {
+      const name = !classes.CapabilityGatekeeper ? "CapabilityGatekeeper" : !classes.CapabilityToken ? "CapabilityToken" : "TreasurySpendAdapter";
+      const payload = artifacts[name]; const classHash = normal(hash.computeContractClassHash(payload.contract));
+      setStatus(`Ready X is preparing one declaration: ${name}.`);
+      try {
+        const declared = await account.declare(payload);
+        await wait(declared.transaction_hash, `${name} declared`);
+      } catch (error) {
+        if (!/already declared|class already/i.test(walletErrorMessage(error))) throw error;
+        write(`${name} was already declared on Mainnet.`);
+      }
+      classes[name] = classHash; saveProgress(); write(`${name} class hash: ${classHash}`);
+    } else if (!progress.gatekeeper) {
+      setStatus("Ready X is preparing the Gatekeeper deployment.");
+      const response = await account.deploy({ classHash: classes.CapabilityGatekeeper, constructorCalldata: [config.privacyPool] });
+      await wait(response.transaction_hash, "Gatekeeper deployed"); progress.gatekeeper = normal(response.contract_address[0]); saveProgress(); write(`Gatekeeper: ${progress.gatekeeper}`);
+    } else if (!progress.adapter) {
+      setStatus("Ready X is preparing the Treasury Adapter deployment.");
+      const response = await account.deploy({ classHash: classes.TreasurySpendAdapter, constructorCalldata: [progress.gatekeeper, config.treasury, config.asset, config.recipient] });
+      await wait(response.transaction_hash, "Treasury Adapter deployed"); progress.adapter = normal(response.contract_address[0]); saveProgress(); write(`Treasury Adapter: ${progress.adapter}`);
+    } else if (!progress.token) {
+      setStatus("Ready X is preparing the Capability Token deployment.");
+      const response = await account.deploy({ classHash: classes.CapabilityToken, constructorCalldata: [shortString.encodeShortString(config.capabilityName), shortString.encodeShortString(config.capabilitySymbol), config.issuer, config.privacyPool, progress.gatekeeper] });
+      await wait(response.transaction_hash, "Capability Token deployed"); progress.token = normal(response.contract_address[0]); saveProgress(); write(`Capability Token: ${progress.token}`);
+    } else if (!progress.setupTransaction) {
+      setStatus("Ready X is preparing the final public setup transaction.");
+      const setup = await account.execute([
+        { contractAddress: progress.gatekeeper, entrypoint: "register_policy", calldata: [progress.token, progress.adapter, hash.getSelectorFromName("spend"), "0x1", `0x${BigInt(config.maxAmount).toString(16)}`, `0x${BigInt(config.expiresAt).toString(16)}`, "0x1"] },
+        { contractAddress: config.asset, entrypoint: "approve", calldata: [progress.adapter, `0x${BigInt(config.treasuryAllowance).toString(16)}`, "0x0"] },
+        { contractAddress: progress.token, entrypoint: "mint", calldata: [config.issuer, "0x3", "0x0"] },
+      ]);
+      await wait(setup.transaction_hash, "Policy setup complete"); progress.setupTransaction = setup.transaction_hash; saveProgress();
+      write(`Gatekeeper: ${progress.gatekeeper}`); write(`Treasury Adapter: ${progress.adapter}`); write(`Capability Token: ${progress.token}`);
     }
-    setStatus("Step 2 of 3: deploying immutable contracts.");
-    const gatekeeper = await account.deploy({ classHash: classes.CapabilityGatekeeper, constructorCalldata: [config.privacyPool] });
-    await wait(gatekeeper.transaction_hash, "Gatekeeper deployed");
-    const gatekeeperAddress = normal(gatekeeper.contract_address[0]);
-    const adapter = await account.deploy({ classHash: classes.TreasurySpendAdapter, constructorCalldata: [gatekeeperAddress, config.treasury, config.asset, config.recipient] });
-    await wait(adapter.transaction_hash, "Treasury Adapter deployed");
-    const adapterAddress = normal(adapter.contract_address[0]);
-    const token = await account.deploy({ classHash: classes.CapabilityToken, constructorCalldata: [shortString.encodeShortString(config.capabilityName), shortString.encodeShortString(config.capabilitySymbol), config.issuer, config.privacyPool, gatekeeperAddress] });
-    await wait(token.transaction_hash, "Capability Token deployed");
-    const tokenAddress = normal(token.contract_address[0]);
-    setStatus("Step 3 of 3: registering policy, capping treasury, and minting passes.");
-    const setup = await account.execute([
-      { contractAddress: gatekeeperAddress, entrypoint: "register_policy", calldata: [tokenAddress, adapterAddress, hash.getSelectorFromName("spend"), "0x1", `0x${BigInt(config.maxAmount).toString(16)}`, `0x${BigInt(config.expiresAt).toString(16)}`, "0x1"] },
-      { contractAddress: config.asset, entrypoint: "approve", calldata: [adapterAddress, `0x${BigInt(config.treasuryAllowance).toString(16)}`, "0x0"] },
-      { contractAddress: tokenAddress, entrypoint: "mint", calldata: [config.issuer, "0x3", "0x0"] },
-    ]);
-    await wait(setup.transaction_hash, "Policy setup complete");
-    write(`Gatekeeper: ${gatekeeperAddress}`); write(`Treasury Adapter: ${adapterAddress}`); write(`Capability Token: ${tokenAddress}`);
-    setStatus("Mainnet demo deployed. Save the three addresses above; next, shield the three passes through a compatible STRK20 wallet.");
   } catch (error) { setStatus(walletErrorMessage(error)); write(`Stopped: ${walletErrorMessage(error)}`); }
-  finally { deployButton.disabled = false; estimateButton.disabled = false; }
+  finally { estimateButton.disabled = false; renderNextStep(); }
 });
 
 const store = createStore({ eip1193Adapters: [] });
