@@ -22,6 +22,18 @@ const wait = async (transactionHash, label) => {
   return receipt;
 };
 
+// The debug map is compiler metadata, not executable Sierra. Wallet declaration
+// requests need only the canonical class fields; omitting it preserves the
+// class hash while avoiding unnecessary extension parsing and payload work.
+function declarationClass(contract) {
+  return {
+    sierra_program: contract.sierra_program,
+    contract_class_version: contract.contract_class_version,
+    entry_points_by_type: contract.entry_points_by_type,
+    abi: contract.abi,
+  };
+}
+
 async function load() {
   const [loadedConfig, ...files] = await Promise.all([
     fetch("./deployment/config.json").then((r) => r.json()),
@@ -31,7 +43,7 @@ async function load() {
     ]),
   ]);
   config = loadedConfig.deployment;
-  artifacts = Object.fromEntries(["CapabilityGatekeeper", "CapabilityToken", "TreasurySpendAdapter"].map((name, index) => [name, { contract: files[index * 2], casm: files[index * 2 + 1] }]));
+  artifacts = Object.fromEntries(["CapabilityGatekeeper", "CapabilityToken", "TreasurySpendAdapter"].map((name, index) => [name, { contract: declarationClass(files[index * 2]), casm: files[index * 2 + 1] }]));
   document.querySelector("#expiry").textContent = new Date(Number(config.expiresAt) * 1000).toLocaleString();
   document.querySelector("#recipient").textContent = shortHex(config.recipient);
 }

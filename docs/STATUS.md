@@ -17,6 +17,8 @@
 
 **Ready X deployment-flow revision (Aug 27, 2026):** owner feedback found the prior automated sequence unsuitable for a large class declaration in the Ready X confirmation UI. The console now uses Ready X's direct declaration request one class at a time, persists only public progress (class hashes, addresses, transaction hash) in browser local storage, and exposes one subsequent wallet confirmation per deploy/setup stage. No relay endpoint, viewing key, signer, or wallet-vendor rule is embedded in the protocol.
 
+**Ready X declaration-payload correction (Aug 27, 2026):** Ready X showed class details but no fee/confirm state for a declaration. The browser console had forwarded compiler-only `sierra_program_debug_info`. It now forwards the canonical Sierra fields only; independent local class-hash checks confirm the stripped payload has the same class hash while reducing the Gatekeeper payload from 191,737 to 140,608 bytes, the token from 197,520 to 156,834 bytes, and the adapter from 74,612 to 49,240 bytes. `npm run verify` passed after the correction. Mainnet Ready X confirmation remains unverified until the owner tests the new build.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**
