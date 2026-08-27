@@ -42,6 +42,7 @@ for (const contract of ["CapabilityGatekeeper", "CapabilityToken", "TreasurySpen
   );
 }
 await cp(new URL("../configs/mainnet-demo.json", import.meta.url), new URL("deployment/config.json", output));
+await cp(new URL("../vercel.json", import.meta.url), new URL("vercel.json", output));
 await build({
   entryPoints: [fileURLToPath(new URL("../apps/web/src/app.mjs", import.meta.url))],
   outfile: fileURLToPath(new URL("app.mjs", output)),
