@@ -1,5 +1,18 @@
 # Status
 
+## BlackBox Protocol mainnet demo preparation (Aug 27, 2026)
+
+**STATUS: OWNER-APPROVED / UNSIGNED — ready for wallet-based fee estimation and deployment; no BlackBox Protocol contract has been declared or deployed on mainnet yet.**
+
+- Owner approval received for issuer/treasury `0x1707…8076e`, STRK payment asset, `0.01 STRK` per use, three reusable passes, and a 30-day expiry. Recipient is `0x05bf…991c6`.
+- Read-only mainnet checks confirmed both owner accounts are deployed and the configured STRK20 privacy pool is live. These are network observations, not a privacy guarantee.
+- Added `configs/mainnet-demo.json` and generated `dist/mainnet-demo-release.json`: an unsigned, reproducible deployment bundle with source/artifact hashes and the precise constructor/setup plan.
+- The reusable design needs a separate financial ceiling: treasury approval is therefore `0.03 STRK` total. Reusable does **not** itself cap the number of uses; once the allowance is exhausted, the adapter cannot pay more.
+- Added `/deploy` to the built site. It loads the pinned contract artifacts/config, accepts only the designated issuer account on Starknet Mainnet, requests wallet-derived declaration fee estimates, and sends each declaration/deployment/setup only after the wallet owner reviews and signs it. It stores no private key.
+- `npm run verify` passed after the deployment-console addition (format, syntax, public-state type contract, six Node test files, build, secret scan).
+
+**Next owner action:** open `/deploy` in a browser with the funded issuer wallet, connect, choose **Estimate declaration fees**, then choose **Deploy approved demo** if every wallet confirmation matches the displayed configuration. Capture the emitted contract addresses and transaction hashes before private-pass issuance.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**

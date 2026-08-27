@@ -11,7 +11,7 @@
     "dev": "node scripts/serve-web.mjs",
     "dev:web": "node scripts/serve-web.mjs",
     "format:check": "node scripts/format-check.mjs",
-    "lint": "node --check packages/core/src/arena.mjs && node --check packages/capability-sdk/src/index.mjs && node --check packages/devnet-session/scripts/run-capability-e2e.mjs && node --check fixtures/strategies/case-study.mjs && node --check apps/web/src/dashboard-model.mjs && node --check apps/web/src/wallet-operator.mjs && node --check apps/web/src/app.mjs && node --check scripts/build-web.mjs && node --check scripts/prepare-capability-release.mjs && node --check scripts/verify-mainnet-readiness.mjs",
+    "lint": "node --check packages/core/src/arena.mjs && node --check packages/capability-sdk/src/index.mjs && node --check packages/devnet-session/scripts/run-capability-e2e.mjs && node --check fixtures/strategies/case-study.mjs && node --check apps/web/src/dashboard-model.mjs && node --check apps/web/src/wallet-operator.mjs && node --check apps/web/src/app.mjs && node --check apps/web/src/deploy.mjs && node --check scripts/build-web.mjs && node --check scripts/prepare-capability-release.mjs && node --check scripts/verify-mainnet-readiness.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "node --test packages/core/test/*.test.mjs tests/*.test.mjs",
     "test:core": "node --test packages/core/test/*.test.mjs",

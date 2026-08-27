@@ -13,11 +13,13 @@ await cp(new URL("../apps/web/src/holder-app.html", import.meta.url), new URL("a
 await cp(new URL("../apps/web/src/home.html", import.meta.url), new URL("index.html", output));
 await cp(new URL("../apps/web/src/docs-hub.html", import.meta.url), new URL("docs.html", output));
 await cp(new URL("../apps/web/src/security-v2.html", import.meta.url), new URL("security.html", output));
+await cp(new URL("../apps/web/src/deploy.html", import.meta.url), new URL("deploy.html", output));
 await cp(new URL("../apps/web/src/docs/overview-page.html", import.meta.url), new URL("docs/overview.html", output));
 await cp(new URL("../apps/web/src/docs/integrate-page.html", import.meta.url), new URL("docs/integrate.html", output));
 await cp(new URL("../apps/web/src/docs/use-page.html", import.meta.url), new URL("docs/use-a-capability.html", output));
 for (const page of [
   "index.html", "app.html", "use-cases.html", "docs.html", "security.html",
+  "deploy.html",
   "docs/overview.html", "docs/integrate.html", "docs/use-a-capability.html",
 ]) {
   const path = new URL(page, output);
@@ -28,6 +30,18 @@ await cp(
   new URL("../packages/capability-sdk/src/index.mjs", import.meta.url),
   new URL("capability-sdk.mjs", output),
 );
+await mkdir(new URL("deployment/", output), { recursive: true });
+for (const contract of ["CapabilityGatekeeper", "CapabilityToken", "TreasurySpendAdapter"]) {
+  await cp(
+    new URL(`../contracts/target/dev/blackbox_arena_contracts_${contract}.contract_class.json`, import.meta.url),
+    new URL(`deployment/${contract}.sierra.json`, output),
+  );
+  await cp(
+    new URL(`../contracts/target/dev/blackbox_arena_contracts_${contract}.compiled_contract_class.json`, import.meta.url),
+    new URL(`deployment/${contract}.casm.json`, output),
+  );
+}
+await cp(new URL("../configs/mainnet-demo.json", import.meta.url), new URL("deployment/config.json", output));
 await build({
   entryPoints: [fileURLToPath(new URL("../apps/web/src/app.mjs", import.meta.url))],
   outfile: fileURLToPath(new URL("app.mjs", output)),
@@ -37,6 +51,10 @@ await build({
   target: ["es2022"],
   sourcemap: true,
   legalComments: "eof",
+});
+await build({
+  entryPoints: [fileURLToPath(new URL("../apps/web/src/deploy.mjs", import.meta.url))],
+  outfile: fileURLToPath(new URL("deploy.mjs", output)), bundle: true, format: "esm", platform: "browser", target: ["es2022"], sourcemap: true, legalComments: "eof",
 });
 await build({
   entryPoints: [fileURLToPath(new URL("../apps/web/src/holder-app.mjs", import.meta.url))],
