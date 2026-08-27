@@ -46,6 +46,8 @@ connectButton.addEventListener("click", async () => {
     if (chain !== MAINNET_CHAIN_ID) throw new Error("Switch the wallet to Starknet Mainnet.");
     if (normal(account.address) !== OWNER) throw new Error("Connect the funded issuer / treasury wallet for this approved demo.");
     document.querySelector("#owner-status").textContent = "Approved issuer";
+    connectButton.textContent = "Issuer wallet connected";
+    connectButton.disabled = true;
     estimateButton.disabled = false; deployButton.disabled = false; setStatus("Issuer wallet ready. Estimate first, then deploy when the wallet shows the exact transactions.");
   } catch (error) { document.querySelector("#owner-status").textContent = "Not ready"; setStatus(walletErrorMessage(error)); }
   finally { connectButton.disabled = false; }

@@ -13,6 +13,8 @@
 
 **Next owner action:** open `/deploy` in a browser with the funded issuer wallet, connect, choose **Estimate declaration fees**, then choose **Deploy approved demo** if every wallet confirmation matches the displayed configuration. Capture the emitted contract addresses and transaction hashes before private-pass issuance.
 
+**Fee checkpoint (owner wallet estimate, Aug 27, 2026):** declaration subtotal was `71.5246676187947 STRK` (Gatekeeper `28.880783124567653`, CapabilityToken `32.11650085619228`, TreasurySpendAdapter `10.527383638034761`). With the observed 79.9 STRK funding, only about 8.375 STRK remains before the three deployments and setup transaction. **Do not sign deployment at this balance.** Top up only after choosing a safety margin for the still-unestimated deploy/setup transactions. The owner console now visibly locks and relabels the connect control after the expected issuer wallet is accepted.
+
 ## BlackBox Protocol vNext — local product slice (2026-08-27)
 
 **STATUS: PRODUCT, CAIRO ENFORCEMENT, SDK, WEB EXPERIENCE, AND LOCAL STRK20 E2E VERIFIED. PUBLIC-NETWORK/MAINNET DEPLOYMENT UNVERIFIED.**
