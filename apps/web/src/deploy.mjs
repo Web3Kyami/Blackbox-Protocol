@@ -61,7 +61,7 @@ estimateButton.addEventListener("click", async () => {
       total += value; write(`${name}: ${value} fri (${Number(value) / 1e18} STRK)`);
     }
     write(`Declaration subtotal: ${total} fri (${Number(total) / 1e18} STRK).`);
-    setStatus("Estimates ready. Deployment also includes two deploy transactions and one setup transaction; your wallet will show the final fee before each signature.");
+    setStatus("Estimates ready. Deployment also includes three deploy transactions and one setup transaction; your wallet will show the final fee before each signature.");
   } catch (error) { setStatus(walletErrorMessage(error)); }
   finally { estimateButton.disabled = false; }
 });
