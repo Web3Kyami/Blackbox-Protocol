@@ -24,12 +24,18 @@
 - Public repository and MIT license: repository initialized locally; remote not configured.
 - Public demo URL: missing.
 - Three-minute video URL: missing.
-- At least three successful mainnet transactions touching live STRK20 pool: missing and not authorized.
-- Blackbox contract involvement where required: missing.
+- Successful Mainnet STRK20 pool evidence: verified issuance transaction
+  [`0x26a637…8e589`](https://voyager.online/tx/0x26a63750cb24beb38cc4eb8a976d04458c9015331b63be89a71c309a2b8e589),
+  accepted at block `13992891`, plus verified holder exercise
+  [`0x7978bc…d1386`](https://voyager.online/tx/0x7978bc0e9292a86c9e01411784dd6ec3db117e967a2ec08a2131844579d1386),
+  accepted at block `13993785`. One further successful pool-touching
+  transaction is needed for the sprint threshold.
+- BlackBox contract involvement is verified in the holder-exercise receipt:
+  configured pool → Gatekeeper → TreasurySpendAdapter paid the fixed `0.01 STRK`.
 
 ## Mainnet readiness report status
 
-Local contract and RC.5 pool compatibility are verified. The final transaction
-sequence is still not authorized: a funded owner account, deployed capability
-classes, a compatible extension wallet, relay configuration, and real receipt
-hashes are still required. Never populate a transaction hash speculatively.
+Local contract and RC.5 pool compatibility are verified. The first owner-gated
+Mainnet issuance receipt is now verified; holder discovery and exercise still
+require owner approval and independent receipt checks. Never populate a
+transaction hash speculatively.

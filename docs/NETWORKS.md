@@ -116,10 +116,25 @@ check repeatable using the public Lava endpoint, or a supplied
 The preferred dapp route is the Starknet Wallet API (wallet API 0.10.3,
 `starknet` 10.4+). A compatible wallet owns viewing keys, discovery, proof
 generation, and rotating-relayer submission, so the app needs no prover URL.
-Wallet support must be detected rather than assumed.
+Wallet support must be detected rather than assumed. As of 2026-08-28, the
+configured Ready X issuer can generate a STRK20 proof but has not returned a
+successful Mainnet submission hash: its native route failed in PaymasterV2 and
+its public ordinary-invoke handler drops the optional SNIP-36 proof. Xverse is
+named by Starknet as a wallet-level STRK20 integration, but its dapp-facing
+Wallet API is still described as landing in the current official starter and
+integration guidance. Do not treat either wallet path as verified for this
+custom-token issuer until it returns a successful transaction hash.
+
+The pool's `get_fee_amount` view returned `6000000000000000000` wei (6 STRK)
+on 2026-08-28. This is a public per-action pool fee allowance, separate from
+the BlackBox adapter's 0.03 STRK treasury allowance. Account A then had
+CapabilityToken→pool allowance 1 and STRK→pool allowance 0; no transaction was
+submitted from this observation.
 
 The low-level Privacy SDK route still has no published mainnet proving-service
 URL in the Day-0 guide. RC.5 also requires a hosted discovery indexer for that
 route because its on-chain discovery provider is not exported. No endpoint will
 be guessed. Mainnet deposits are screened and expose depositor, token, and
-amount. No mainnet signing or transaction is authorized.
+amount. BlackBox contract deployment and setup transactions succeeded under
+separate owner approvals; private issuance and holder exercise remain
+`UNVERIFIED` and require a wallet-returned Mainnet transaction hash.
