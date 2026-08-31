@@ -1,0 +1,26 @@
+{
+  "name": "blackbox-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "User-first self-service layer over the existing BlackBox Protocol. See apps/studio/docs/PHASE0_ARCHITECTURE.md.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "verify": "npm test",
+    "build": "npm run build:preview",
+    "build:preview": "node scripts/build-preview.mjs",
+    "preview": "npm run build:preview && node scripts/serve-preview.mjs",
+    "test:sdk-parity": "node --test test/sdk-parity.test.mjs",
+    "test:wallet-parity": "node --test test/wallet-utils-parity.test.mjs",
+    "test:secret-scan": "node --test test/secret-scan.test.mjs",
+    "test:phase-1-smoke": "node --test test/phase-1-smoke.test.mjs",
+    "test:phase-5": "node --test test/phase-5-dashboard.test.mjs"
+  },
+  "dependencies": {
+    "@starknet-io/get-starknet-discovery": "6.0.2",
+    "starknet": "10.5.0"
+  }
+}
