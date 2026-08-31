@@ -409,3 +409,14 @@ contracts were correct; only the Studio read code had to learn their real shape.
   walkers recurse through arrays so the invalid shape cannot hide controls.
 - **Prevention:** the self-contained output is now opened in Chromium after the
   build, including the `?policy=` route.
+
+### S-33 — First isolated Vercel build could not resolve esbuild
+
+- **Symptom:** the new `blackbox-studio` project installed Studio dependencies,
+  then `npm run build` failed with `ERR_MODULE_NOT_FOUND: esbuild`.
+- **Root cause:** local builds resolved `esbuild` from the parent repository's
+  `node_modules`; the isolated Studio package had not declared it.
+- **Fix:** pin `esbuild@0.25.12` as a Studio development dependency and commit
+  the lockfile. The next production deployment completed successfully.
+- **Prevention:** deployment tooling used directly by a package must be declared
+  by that package, even when a monorepo parent happens to provide it locally.

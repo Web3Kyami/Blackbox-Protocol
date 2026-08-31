@@ -47,6 +47,9 @@ contracts and do not broadcast a Mainnet action without explicit owner approval.
 
 ## Current verification
 
+- Production: `https://blackbox-studio-phi.vercel.app`.
+- The production HTML, application bundle, stylesheet, and operator query route
+  return HTTP 200.
 - Studio verify: passed, 9 test files.
 - Studio preview build: passed.
 - `vercel.json` builds the self-contained `preview/` output. Set the Vercel root
@@ -58,6 +61,6 @@ contracts and do not broadcast a Mainnet action without explicit owner approval.
 
 ## Immediate continuation
 
-Run repository-root `npm run verify`. Then deploy/serve Studio and perform one
-controlled Mainnet walkthrough. Do not redesign or change contracts while
-testing. Record any wallet/RPC error exactly, without secrets.
+Perform one controlled Mainnet walkthrough on the production URL. Do not
+redesign or change contracts while testing. Record any wallet/RPC error exactly,
+without secrets.

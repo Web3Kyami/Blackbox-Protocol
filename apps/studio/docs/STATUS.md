@@ -52,6 +52,8 @@ No transaction was signed or broadcast during this audit.
 
 ## Verification
 
+- Production deployment: `https://blackbox-studio-phi.vercel.app`.
+- Public HTML, application bundle, stylesheet, and `?policy=` route: HTTP 200.
 - Studio `npm run verify`: passed, 9 test files.
 - Studio `npm run build:preview`: passed.
 - Chromium overview render at 1440×1000: passed.
@@ -70,6 +72,6 @@ No transaction was signed or broadcast during this audit.
 
 ## Next action
 
-Deploy or serve Studio, then run one controlled Mainnet walkthrough. Review the
+Run one controlled Mainnet walkthrough on the production URL. Review the
 contract, amount, and recipient in every wallet prompt. Stop after any unexpected
 prompt; do not approve a second payment merely to repeat the video.
