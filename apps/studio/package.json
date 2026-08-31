@@ -22,5 +22,8 @@
   "dependencies": {
     "@starknet-io/get-starknet-discovery": "6.0.2",
     "starknet": "10.5.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
   }
 }
