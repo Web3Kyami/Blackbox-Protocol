@@ -8,11 +8,13 @@
 // gate).
 //
 // Discovery strategy (read-only, RPC-based):
-//   1. Scan the Gatekeeper's `PolicyRegistered` events. The event's `issuer`
-//      field is a #[key], so we filter events by `issuer = <connected wallet>`.
-//   2. For each discovered capability_token, read get_policy + token/adapter
+//   1. Scan Mainnet UDC deployment events for CapabilityToken contracts
+//      deployed by the connected treasury wallet.
+//   2. Resolve each token's Gatekeeper, policy, adapter, and payment asset from
+//      the deployed contracts themselves.
+//   3. For each discovered capability_token, read get_policy + token/adapter
 //      views via policy-reads.mjs to build a full row.
-//   3. Classify each policy into a lifecycle state from REAL on-chain signals:
+//   4. Classify each policy into a lifecycle state from REAL on-chain signals:
 //        - active   : get_policy.active == true AND now <= expires_at
 //        - expired  : now > expires_at (regardless of active flag)
 //        - revoked  : get_policy.active == false AND now < expires_at
@@ -25,60 +27,52 @@
 // returns an empty list and the dashboard renders its empty state.
 // =============================================================================
 
-import { hash } from "starknet";
+import { constants, hash, shortString } from "starknet";
 import {
   makeNetworkProvider,
   explorerTx,
   explorerAddress,
   explorerToken,
 } from "./studio-network.mjs";
-import { readPolicyRow } from "./policy-reads.mjs";
+import { getAdapterConfig, getPolicy, getTokenMeta, readPolicyRow } from "./policy-reads.mjs";
 
-// Compute the `PolicyRegistered` event key hash for filtering by issuer.
-// starknet.js getEvents takes `keys: [[key0, key1, ...]]` where each key is a
-// felt; for an event with two #[key] fields (capability_token, issuer), the
-// key array is [eventKey, capability_token?, issuer?]. We filter on issuer as
-// the second key.
-function policyRegisteredEventKey() {
-  return hash.getSelectorFromName("PolicyRegistered");
-}
+export const STUDIO_DISCOVERY_FROM_BLOCK = 14_200_000;
+export const CAPABILITY_TOKEN_CLASS_HASH = "0x408fa2fde6f253b3771c43181c8eb8c7f5f71a929c4bd74cb0b25852e5a17e7";
 
-// Scan all `PolicyRegistered` events on the Gatekeeper and filter by `issuer`
-// client-side. The event's `#[key]` fields are emitted as:
-//   keys[0] = event selector (hash("PolicyRegistered"))
-//   keys[1] = capability_token   (first #[key])
-//   keys[2] = issuer              (second #[key])
-// Server-side wildcard at position 1 is unreliable across RPC providers, so we
-// paginate all events and match issuer from keys[2]. For a single Studio
-// Gatekeeper the volume is tiny; this is correct and provider-agnostic.
-async function discoverTokensForIssuer(provider, gatekeeper, issuer, fromBlock = 0) {
-  const eventKey = policyRegisteredEventKey();
-  const issuerFelt = BigInt(issuer).toString();
+export function tokensFromUdcEvents(events, issuer) {
+  const expectedIssuer = BigInt(issuer);
+  const expectedClass = BigInt(CAPABILITY_TOKEN_CLASS_HASH);
   const tokens = [];
   const seen = new Set();
+  for (const event of events || []) {
+    const data = event.data || [];
+    if (data.length < 4) continue;
+    if (BigInt(data[1]) !== expectedIssuer || BigInt(data[3]) !== expectedClass) continue;
+    const token = felt(data[0]);
+    if (!seen.has(token)) {
+      seen.add(token);
+      tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+async function discoverStudioTokensForIssuer(provider, issuer, fromBlock) {
+  const events = [];
   let continuation = undefined;
   do {
-    const res = await provider.getEvents({
-      address: gatekeeper,
-      keys: [[eventKey]], // match the event selector only; filter issuer below
+    const result = await provider.getEvents({
+      address: constants.UDC.ADDRESS,
+      keys: [[hash.getSelectorFromName("ContractDeployed")]],
       from_block: { block_number: fromBlock },
       to_block: "latest",
       continuation_token: continuation,
-      chunk_size: 100,
+      chunk_size: 1000,
     });
-    for (const ev of res.events || []) {
-      const evIssuer = ev.keys && ev.keys[2] ? felt(ev.keys[2]) : null;
-      const token = ev.keys && ev.keys[1] ? felt(ev.keys[1]) : null;
-      if (!token || !evIssuer) continue;
-      if (BigInt(evIssuer).toString() !== issuerFelt) continue; // org-owned only
-      if (!seen.has(token)) {
-        seen.add(token);
-        tokens.push(token);
-      }
-    }
-    continuation = res.continuation_token;
+    events.push(...(result.events || []));
+    continuation = result.continuation_token;
   } while (continuation);
-  return tokens;
+  return tokensFromUdcEvents(events, issuer);
 }
 
 function felt(v) {
@@ -122,8 +116,9 @@ export function toDashboardRecord(row, { discoveredAtBlock, registerTx } = {}) {
     active: row.policy.active,
     uses: row.policy.uses,
     // Token / spend (all metadata is read from the public token contract)
-    tokenSymbol: row.tokenMeta.symbol,
-    tokenName: row.tokenMeta.name,
+    tokenSymbol: "STRK",
+    capabilitySymbol: decodeFeltText(row.tokenMeta.symbol),
+    tokenName: decodeFeltText(row.tokenMeta.name),
     tokenTotalSupply: row.tokenMeta.totalSupply.toString(),
     privacyPool: row.tokenMeta.privacyPool,
     tokenGatekeeper: row.tokenMeta.gatekeeper,
@@ -150,32 +145,31 @@ export function toDashboardRecord(row, { discoveredAtBlock, registerTx } = {}) {
   };
 }
 
+function decodeFeltText(value) {
+  try { return shortString.decodeShortString(value); }
+  catch { return value; }
+}
+
 // Main entry: index an org's policies on a given network.
 // opts: { rpcUrl?, gatekeeper?, adapter?, asset?, fromBlock? }
 // Returns { org, network, count, byState, records }.
 export async function indexOrgPolicies(orgAddress, opts = {}) {
   const provider = makeNetworkProvider(opts);
-  const gatekeeper = opts.gatekeeper;
-  const adapter = opts.adapter;
-  const asset = opts.asset;
-  if (!gatekeeper || !adapter || !asset) {
-    const err = new Error(
-      "Studio network contract configuration is missing; supply gatekeeper, adapter, and asset from the integration runtime.",
-    );
-    err.code = "CONFIGURATION_REQUIRED";
-    throw err;
-  }
-
-  const tokens = await discoverTokensForIssuer(
+  const tokens = await discoverStudioTokensForIssuer(
     provider,
-    gatekeeper,
     orgAddress,
-    opts.fromBlock ?? 0,
+    opts.fromBlock ?? STUDIO_DISCOVERY_FROM_BLOCK,
   );
 
   const records = [];
   for (const token of tokens) {
     try {
+      const tokenMeta = await getTokenMeta(provider, token);
+      const gatekeeper = tokenMeta.gatekeeper;
+      const policy = await getPolicy(provider, gatekeeper, token);
+      const adapter = policy.target;
+      const adapterConfig = await getAdapterConfig(provider, adapter, token);
+      const asset = adapterConfig.token;
       const row = await readPolicyRow(provider, {
         gatekeeper,
         token,

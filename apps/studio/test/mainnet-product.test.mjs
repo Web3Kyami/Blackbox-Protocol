@@ -8,11 +8,14 @@ import {
   normalizeStarknetAddress,
   strkToAtomic,
   atomicToStrk,
+  validateHolderAmount,
   mainnetProvider,
   deployNext,
   approvePassDelivery,
   deliverPrivatePass,
   exerciseHolderPass,
+  deliveryApprovalStatus,
+  deliveryTransactionFromEvents,
 } from "../src/sdk/mainnet-actions.mjs";
 import { renderHolder } from "../src/ui/holder.mjs";
 
@@ -28,6 +31,18 @@ test("STRK amounts use exact 18-decimal integer conversion", () => {
   assert.equal(strkToAtomic("20"), 20_000_000_000_000_000_000n);
   assert.equal(atomicToStrk(strkToAtomic("0.01")), "0.01");
   assert.throws(() => strkToAtomic("0.0000000000000000001"));
+});
+
+test("holder amounts accept smaller payments and reject invalid values before the wallet", () => {
+  const record = {
+    maxFirstArg: strkToAtomic("0.01").toString(),
+    remainingBudget: strkToAtomic("0.03").toString(),
+  };
+  assert.equal(validateHolderAmount("0.005", record), strkToAtomic("0.005"));
+  assert.equal(validateHolderAmount("0.01", record), strkToAtomic("0.01"));
+  assert.throws(() => validateHolderAmount("", record), /valid STRK amount/);
+  assert.throws(() => validateHolderAmount("0", record), /greater than zero/);
+  assert.throws(() => validateHolderAmount("0.02", record), /per-payment maximum/);
 });
 
 test("deployment resumes one confirmed stage at a time", () => {
@@ -69,6 +84,28 @@ test("pending hashes resume receipt checks without submitting duplicate actions"
     assert.equal((await approvePassDelivery(neverSubmit, "0x3", 1n, { pendingApprovalTransaction: "0xbbb", fee: "6" })).transactionHash, "0xbbb");
     assert.equal((await deliverPrivatePass(neverSubmit, "0x3", "0x2", 1, 1n, { pendingDeliveryTransaction: "0xccc" })).transactionHash, "0xccc");
     assert.equal((await exerciseHolderPass(neverSubmit, [], { pendingTransaction: "0xddd" })).transactionHash, "0xddd");
+    assert.equal((await exerciseHolderPass(neverSubmit, [], { completedTransaction: "0xeee" })).transactionHash, "0xeee");
+  } finally {
+    mainnetProvider.waitForTransaction = originalWait;
+  }
+});
+
+test("a rejected pending payment fails without submitting a replacement", async () => {
+  const originalWait = mainnetProvider.waitForTransaction;
+  mainnetProvider.waitForTransaction = async () => ({ isSuccess: () => false });
+  let submissions = 0;
+  const account = {
+    strk20InvokeTransaction: async () => {
+      submissions += 1;
+      return { transaction_hash: "0xnew" };
+    },
+  };
+  try {
+    await assert.rejects(
+      exerciseHolderPass(account, [], { pendingTransaction: "0xfailed" }),
+      /was not successful/,
+    );
+    assert.equal(submissions, 0, "recovery must not replace a rejected transaction automatically");
   } finally {
     mainnetProvider.waitForTransaction = originalWait;
   }
@@ -78,6 +115,33 @@ test("invalid recipient addresses fail before a wallet approval", () => {
   assert.equal(BigInt(normalizeStarknetAddress("0x1")), 1n);
   assert.throws(() => normalizeStarknetAddress("not-a-wallet"), /valid Starknet wallet/);
   assert.throws(() => normalizeStarknetAddress("0x0"), /valid Starknet wallet/);
+});
+
+test("delivery approval recovers from current onchain allowances", async () => {
+  const provider = {
+    getBlockNumber: async () => 123,
+    callContract: async ({ contractAddress, entrypoint }) => {
+      if (entrypoint === "get_fee_amount") return ["0x6"];
+      if (entrypoint === "allowance") {
+        return contractAddress === "0xabc" ? ["0x1", "0x0"] : ["0x6", "0x0"];
+      }
+      throw new Error("unexpected call");
+    },
+  };
+  const status = await deliveryApprovalStatus("0x1", "0xabc", provider);
+  assert.equal(status.approved, true);
+  assert.equal(status.fee, "6");
+  assert.equal(status.observedAtBlock, 123);
+});
+
+test("a successful public deposit identifies an already delivered private pass", () => {
+  const owner = "0x1";
+  const events = [
+    { keys: ["0xtransfer", "0x0", owner], data: ["0x1", "0x0"], transaction_hash: "0xmint" },
+    { keys: ["0xtransfer", owner, "0x2"], data: ["0x1", "0x0"], transaction_hash: "0xother" },
+    { keys: ["0xtransfer", owner, "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a"], data: ["0x1", "0x0"], transaction_hash: "0xdelivery" },
+  ];
+  assert.equal(deliveryTransactionFromEvents(events, owner), "0xdelivery");
 });
 
 test("operator policy details stay hidden before wallet proof", () => {

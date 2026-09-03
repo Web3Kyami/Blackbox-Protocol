@@ -57,23 +57,34 @@ function exercisePanel(policyState, state, record) {
   const iss = state?.holder?.issuance || state?.issuance || {};
   const fields = (iss && iss.fields) || {};
   const maxFirstArg = formatTokenAmount(record?.policy?.maxFirstArg ?? record?.maxFirstArg, record?.tokenSymbol);
+  if (state?.holder?.view === "complete" && iss.receipt?.txHash) {
+    const remaining = formatTokenAmount(record?.remainingBudget || "0", record?.tokenSymbol);
+    return el("section", { class: "hb-exercise hb-exercise--complete" }, [
+      el("span", { class: "studio-kicker" }, ["PAYMENT CONFIRMED"]),
+      el("h3", {}, [`${fields.amount || "0"} ${record?.tokenSymbol || "STRK"} sent`]),
+      el("p", {}, [`Remaining treasury allowance: ${remaining} ${record?.tokenSymbol || "STRK"}`]),
+      el("a", {
+        class: "hb-btn hb-btn--primary",
+        href: `https://voyager.online/tx/${iss.receipt.txHash}`,
+        target: "_blank",
+        rel: "noopener noreferrer",
+      }, ["View transaction"]),
+    ]);
+  }
   return el("section", { class: "hb-exercise" }, [
     el("h3", {}, ["Request the approved payment"]),
     el("label", {}, [
       `Payment amount (maximum ${maxFirstArg} ${record?.tokenSymbol || "STRK"})`,
       el("input", {
-        type: "number", min: "0.000000000000000001", max: maxFirstArg, step: "0.000001", value: fields.amount || "0.01",
+        type: "text", inputmode: "decimal", name: "holder-payment-amount",
+        value: fields.amount ?? "",
+        "aria-invalid": iss.error ? "true" : null,
         "data-action": "holder-amount",
         oninput: { type: "holder-amount", value: "@" },
       }),
+      iss.error ? el("span", { class: "hb-field-error", role: "alert" }, [iss.error]) : null,
     ]),
     el("button", { class: "hb-btn hb-btn--primary", "data-action": "holder-exercise", onclick: { type: "holder-exercise" } }, ["Request payment"]),
-    iss && iss.receipt
-      ? el("div", { class: "hb-receipt" }, [
-          el("strong", {}, ["Payment confirmed: "]),
-          el("code", {}, [iss.receipt.txHash || iss.receipt.note || "(none)"]),
-        ])
-      : null,
   ]);
 }
 
@@ -85,15 +96,14 @@ export function renderHolder(state) {
 
   const connected = state?.wallet?.address;
   const children = [
-    el("span", { class: "studio-kicker" }, ["OPERATOR LINK"]),
-    el("h2", {}, ["Use a treasury permission"]),
-    el("p", { class: "hb-lede" }, ["Connect the same compatible wallet that received the private pass. The public link identifies the rule; it is not the permission itself."]),
+    el("h2", {}, ["Request an approved payment"]),
+    el("p", { class: "hb-lede" }, ["Connect the wallet that received this permission, then review the approved payment."]),
   ];
 
   if (hstate.view === "loading" || hstate.view === "checking" || hstate.view === "confirming") {
     children.push(el("section", { class: "hb-load hb-load--loading" }, [
       el("strong", {}, [hstate.view === "confirming" ? "Confirming payment" : hstate.view === "checking" ? "Checking your permission" : "Loading mandate"]),
-      el("p", {}, [hstate.view === "confirming" ? "Your wallet submitted the request. Waiting for Mainnet confirmation." : hstate.view === "checking" ? "Your wallet is checking for the private pass." : "Reading the public payment rule."]),
+      el("p", {}, [hstate.view === "confirming" ? "Your wallet submitted the request. Waiting for Mainnet confirmation." : hstate.view === "checking" ? "Your wallet is preparing the private proof. This usually takes 5 to 10 seconds." : "Reading the public payment rule."]),
     ]));
   } else if (hstate.view === "error" || hstate.view === "no-pass") {
     children.push(el("section", { class: "hb-load hb-load--error" }, [
@@ -106,17 +116,8 @@ export function renderHolder(state) {
     // Input state: paste the shared-link token.
     children.push(
       el("section", { class: "hb-load" }, [
-        el("div", { class: "operator-sequence" }, [
-          el("strong", {}, ["Before you request payment"]),
-          el("ol", {}, [
-            el("li", {}, ["Open the link supplied by the treasury team."]),
-            el("li", {}, ["Connect the wallet that received the private permission pass."]),
-            el("li", {}, ["Check the pass in your wallet."]),
-            el("li", {}, ["Review and confirm the payment."]),
-          ]),
-        ]),
         hstate.token
-          ? el("div", { class: "operator-wallet" }, [el("span", {}, ["Mandate link ready"])])
+          ? el("div", { class: "operator-wallet" }, [el("span", {}, ["Payment permission ready"])])
           : el("label", { class: "operator-policy-field" }, [
               el("span", {}, ["Mandate address"]),
               el("small", {}, ["Paste the address supplied by the treasury team."]),

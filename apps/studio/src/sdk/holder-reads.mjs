@@ -23,22 +23,23 @@ import { toDashboardRecord, classifyPolicy } from "./org-policy-indexer.mjs";
 
 // Load a single policy record by its token address. The shared holder link
 // carries at minimum `token`; gatekeeper/adapter are resolved from the real
-// on-chain token and policy wiring unless explicitly supplied for a read test.
-// opts: { rpcUrl?, gatekeeper?, adapter?, asset? }
+// on-chain token and policy wiring. Runtime deployment defaults must never
+// override a token-specific holder link.
+// opts: { rpcUrl?, provider? }
 // Returns the normalized record (shape identical to indexOrgPolicies records).
 export async function loadHolderPolicy(token, opts = {}) {
   if (!token) throw new TypeError("token address is required to load a holder policy.");
-  const provider = makeNetworkProvider(opts);
+  const provider = opts.provider || makeNetworkProvider(opts);
   try {
     // Resolve the token's public wiring first. The token owns the
     // get_gatekeeper/get_privacy_pool relationship; the holder link must not
     // assume Studio's deployed addresses for an arbitrary policy token.
     const tokenMeta = await getTokenMeta(provider, token);
-    const gatekeeper = opts.gatekeeper || tokenMeta.gatekeeper;
+    const gatekeeper = tokenMeta.gatekeeper;
     const policy = await getPolicy(provider, gatekeeper, token);
-    const adapter = opts.adapter || policy.target;
+    const adapter = policy.target;
     const adapterConfig = await getAdapterConfig(provider, adapter, token);
-    const asset = opts.asset || adapterConfig.token;
+    const asset = adapterConfig.token;
     const row = await readPolicyRow(provider, { gatekeeper, token, adapter, asset });
     const record = toDashboardRecord(row);
     // Attach a nested `policy` object so downstream SDK calls
@@ -67,8 +68,8 @@ export async function loadHolderPolicy(token, opts = {}) {
       err.code = "NO_POLICY";
       throw err;
     }
-    const err = new Error(`No active policy: address ${token} has no BlackBox capability policy (not a capability token, or RPC error: ${e?.message || e}).`);
-    err.code = "NO_POLICY";
+    const err = new Error(`Mainnet could not be read. Check your connection and try again. The mandate link has not been rejected. Details: ${e?.message || e}`);
+    err.code = "NETWORK_READ_FAILED";
     throw err;
   }
 }

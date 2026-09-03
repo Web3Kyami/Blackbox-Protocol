@@ -1,6 +1,6 @@
 # BlackBox Studio continuation handoff
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-02
 
 ## Read first
 
@@ -33,6 +33,13 @@ contracts and do not broadcast a Mainnet action without explicit owner approval.
   private note, credential, or key is stored.
 - A submitted hash is pending, never success. On retry, Studio waits for that
   receipt instead of resubmitting the same action.
+- A confirmed holder hash is retained locally. On refresh, Studio verifies that
+  receipt and restores the completed view without preparing or sending another
+  payment.
+- Mandate discovery is read-only and onchain. Studio scans Mainnet UDC events
+  for CapabilityToken contracts deployed by the connected treasury, then reads
+  their Gatekeeper, adapter, and policy state. Browser storage is only a cache
+  for incomplete deployment and private-delivery progress.
 
 ## Primary files
 
@@ -58,9 +65,46 @@ contracts and do not broadcast a Mainnet action without explicit owner approval.
   Chromium from the self-contained deployment artifact.
 - No Mainnet transaction was sent during the audit.
 - Real Studio wallet orchestration and two-wallet rejection remain `UNVERIFIED`.
+- The real contract and STRK20 path passed locally on Devnet. This verifies the
+  protocol path and local integration, not Studio's Mainnet wallet journey.
+- Remaining budget now reads the current ERC-20 allowance without subtracting
+  total spending twice. Confirmed and pending holder payments recover by hash
+  without automatic resubmission.
+- Wizard field edits now refresh the summary and Continue button immediately
+  while preserving focus and caret position.
 
 ## Immediate continuation
 
-Perform one controlled Mainnet walkthrough on the production URL. Do not
-redesign or change contracts while testing. Record any wallet/RPC error exactly,
-without secrets.
+Studio mandate `BBXS-20260910-001` is active. Its private-pass delivery
+transaction is
+`0x1515b9301e56fe3f68f7cd2b778bc94bc159601535d8f48fc1c618ef4a166f8`,
+verified `SUCCEEDED` and `ACCEPTED_ON_L1` at block `14262867`. Reload the delivery
+page to recover step 4 and copy the operator link. The next network write is the
+operator's `0.01 STRK` holder exercise, which remains `UNVERIFIED` and requires
+the owner's explicit fee and action approval before confirmation.
+
+On Sep 3, the copied operator link briefly reported no active policy. Direct
+read-only checks through Lava and PublicNode both resolved the linked token to
+the active Studio mandate with `0.03 STRK` remaining and zero uses. The actual
+UI defect was that runtime addresses from the older reference deployment
+overrode the linked token's own Gatekeeper and adapter. Holder loading now
+derives those addresses and the asset exclusively from the token's onchain
+wiring; runtime configuration supplies only the read RPC. Studio also fails
+over between two public RPCs. Phone and tablet layouts were
+audited; the mobile navigation overlay and narrow-content overflow were fixed.
+The preview now emits one stable `app.mjs`, so a rebuild cannot remove a lazy
+flow module needed by an open wallet session. Pre-fix tabs need one hard refresh.
+
+The holder amount field is now editable and defaults to the policy maximum.
+Smaller positive amounts are accepted; malformed, zero, above-cap, and
+above-budget values fail inside Studio before wallet submission. Errors remain
+inline and preserve the checked permission state. Studio prefetches the public
+policy, while Ready's private-note proof stage remains wallet-owned and can
+take 5 to 10 seconds.
+
+The responsive cascade was consolidated after the Authority Ledger visual
+layer. Every main product surface now has an explicit tablet and phone layout,
+with rendered checks at 320, 390, 768, and 1024 pixels. Do not add an earlier
+media query and assume it wins; extend the final responsive section instead.
+The operator page now says `Request an approved payment` and omits internal
+terminal/link labels and the repeated instructional checklist.

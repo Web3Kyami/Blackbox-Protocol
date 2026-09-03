@@ -1,10 +1,12 @@
 import { RpcProvider, WalletAccountV6, hash, shortString, validateAndParseAddress, walletV6 } from "starknet";
 import { createStore } from "@starknet-io/get-starknet-discovery";
+import { getAllowance } from "./policy-reads.mjs";
 
 export const MAINNET_CHAIN_ID = "0x534e5f4d41494e";
 export const MAINNET_RPC = "https://rpc.starknet.lava.build";
 export const MAINNET_POOL = "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a";
 export const STRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
+export const STUDIO_MAINNET_FROM_BLOCK = 14_200_000;
 
 export const MAINNET_CLASSES = Object.freeze({
   CapabilityGatekeeper: "0x62b8b737e10c4b06727e9ef672fc0163f8331388e812a249f28cc9edaa63efe",
@@ -30,6 +32,18 @@ export function atomicToStrk(value) {
   const whole = atomic / unit;
   const fraction = (atomic % unit).toString().padStart(18, "0").replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+export function validateHolderAmount(value, record) {
+  const atomic = strkToAtomic(value);
+  if (atomic <= 0n) throw new Error("Enter an amount greater than zero.");
+  if (atomic > BigInt(record?.maxFirstArg ?? 0)) {
+    throw new Error("The amount is above this mandate's per-payment maximum.");
+  }
+  if (atomic > BigInt(record?.remainingBudget ?? 0)) {
+    throw new Error("The amount is above the mandate's remaining budget.");
+  }
+  return atomic;
 }
 
 export function normalizeStarknetAddress(value) {
@@ -179,10 +193,61 @@ export async function deployNext(account, draft, plan, progress = {}, onProgress
   return next;
 }
 
-export async function currentPoolFee() {
-  const result = await mainnetProvider.callContract({ contractAddress: MAINNET_POOL, entrypoint: "get_fee_amount", calldata: [] });
+export async function currentPoolFee(provider = mainnetProvider) {
+  const result = await provider.callContract({ contractAddress: MAINNET_POOL, entrypoint: "get_fee_amount", calldata: [] });
   if (!result?.[0]) throw new Error("The privacy pool did not return its fee.");
   return BigInt(result[0]);
+}
+
+export async function deliveryApprovalStatus(owner, token, provider = mainnetProvider) {
+  const [fee, passAllowance, feeAllowance, observedAtBlock] = await Promise.all([
+    currentPoolFee(provider),
+    getAllowance(provider, token, owner, MAINNET_POOL),
+    getAllowance(provider, STRK, owner, MAINNET_POOL),
+    provider.getBlockNumber(),
+  ]);
+  return {
+    approved: BigInt(passAllowance) >= 1n && BigInt(feeAllowance) >= fee,
+    passAllowance,
+    feeAllowance,
+    fee: fee.toString(),
+    observedAtBlock: Number(observedAtBlock),
+  };
+}
+
+export function deliveryTransactionFromEvents(events, owner) {
+  const expectedOwner = BigInt(owner);
+  const expectedPool = BigInt(MAINNET_POOL);
+  const matching = (events || []).filter((event) => {
+    const keys = event.keys || [];
+    const data = event.data || [];
+    if (keys.length < 3 || data.length < 2) return false;
+    const amount = BigInt(data[0]) + (BigInt(data[1]) << 128n);
+    return BigInt(keys[1]) === expectedOwner && BigInt(keys[2]) === expectedPool && amount >= 1n;
+  });
+  return matching.length ? matching[matching.length - 1].transaction_hash : null;
+}
+
+export async function findPrivatePassDelivery(owner, token, provider = mainnetProvider) {
+  const events = [];
+  let continuation = undefined;
+  do {
+    const result = await provider.getEvents({
+      address: token,
+      keys: [[hash.getSelectorFromName("Transfer")]],
+      from_block: { block_number: STUDIO_MAINNET_FROM_BLOCK },
+      to_block: "latest",
+      continuation_token: continuation,
+      chunk_size: 100,
+    });
+    events.push(...(result.events || []));
+    continuation = result.continuation_token;
+  } while (continuation);
+  const transactionHash = deliveryTransactionFromEvents(events, owner);
+  if (!transactionHash) return null;
+  const receipt = await provider.getTransactionReceipt(transactionHash);
+  if (!receipt.isSuccess()) return null;
+  return { transactionHash, blockNumber: Number(receipt.block_number || 0) };
 }
 
 export async function approvePassDelivery(account, token, amount = 1n, progress = {}, onProgress = () => {}) {
@@ -221,6 +286,9 @@ export async function prepareHolderProof(account, actions) {
 }
 
 export async function exerciseHolderPass(account, actions, progress = {}, onProgress = () => {}) {
+  if (progress.completedTransaction) {
+    return successful(progress.completedTransaction, "Payment request");
+  }
   if (progress.pendingTransaction) return successful(progress.pendingTransaction, "Payment request");
   const response = await account.strk20InvokeTransaction(actions);
   onProgress({ pendingTransaction: response.transaction_hash });

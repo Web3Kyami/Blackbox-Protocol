@@ -28,7 +28,10 @@ const server = createServer((request, response) => {
     response.writeHead(404).end("Not found");
     return;
   }
-  response.writeHead(200, { "content-type": types[extname(path)] ?? "application/octet-stream" });
+  response.writeHead(200, {
+    "content-type": types[extname(path)] ?? "application/octet-stream",
+    "cache-control": "no-store",
+  });
   createReadStream(path).pipe(response);
 });
 

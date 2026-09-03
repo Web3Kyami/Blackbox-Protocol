@@ -16,6 +16,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { renderDashboard, STATE_LABEL } from "../src/ui/dashboard.mjs";
+import { remainingBudgetFromAllowance } from "../src/sdk/policy-reads.mjs";
+import { CAPABILITY_TOKEN_CLASS_HASH, tokensFromUdcEvents } from "../src/sdk/org-policy-indexer.mjs";
 
 const ORG = "0x4ff92744c1ed2927e7c3a97cf14b84b197868df7a3486677a8fa8c8974aa6c8";
 
@@ -163,4 +165,34 @@ test("loading state renders a loading status, no rows", () => {
   const all = walk(tree);
   const cards = findByAttr(all, "data-testid", "studio-policy-card");
   assert.equal(cards.length, 0, "loading state must not show rows prematurely");
+});
+
+test("successive payments use the reduced ERC-20 allowance as remaining budget", () => {
+  const payment = 1_000_000_000_000_000_000n;
+  const initialAllowance = 3n * payment;
+
+  assert.equal(remainingBudgetFromAllowance(initialAllowance), (3n * payment).toString());
+  assert.equal(
+    remainingBudgetFromAllowance(initialAllowance - payment),
+    (2n * payment).toString(),
+    "the first payment must reduce the displayed budget once, not twice",
+  );
+  assert.equal(
+    remainingBudgetFromAllowance(initialAllowance - 2n * payment),
+    payment.toString(),
+    "the final valid payment must remain available after two successful payments",
+  );
+  assert.equal(remainingBudgetFromAllowance(0n), "0");
+});
+
+test("Studio mandates are discovered from treasury-owned UDC deployments", () => {
+  const token = "0xabc";
+  const otherToken = "0xdef";
+  const events = [
+    { data: [token, ORG, "0x1", CAPABILITY_TOKEN_CLASS_HASH] },
+    { data: [token, ORG, "0x1", CAPABILITY_TOKEN_CLASS_HASH] },
+    { data: [otherToken, "0x999", "0x1", CAPABILITY_TOKEN_CLASS_HASH] },
+    { data: ["0x123", ORG, "0x1", "0x456"] },
+  ];
+  assert.deepEqual(tokensFromUdcEvents(events, ORG), [token]);
 });

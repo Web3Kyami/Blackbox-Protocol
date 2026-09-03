@@ -121,6 +121,15 @@ export async function getAllowance(provider, asset, owner, spender) {
   return u256ToDecimal(r).toString();
 }
 
+// ERC-20 transfer_from reduces allowance as each payment succeeds. The current
+// allowance is therefore already the remaining hard payment budget. Keep
+// totalSpent as separate history, but never subtract it from allowance again.
+export function remainingBudgetFromAllowance(allowance) {
+  const value = BigInt(allowance);
+  if (value < 0n) throw new RangeError("allowance cannot be negative");
+  return value.toString();
+}
+
 // -----------------------------------------------------------------------------
 // Aggregate: read everything needed for one dashboard row.
 // -----------------------------------------------------------------------------
@@ -149,8 +158,6 @@ export async function readPolicyRow(provider, { gatekeeper, token, adapter, asse
     adapterConfig.treasury,
     adapter,
   );
-  const totalSpent = BigInt(adapterConfig.totalSpent);
-  const remaining = BigInt(allowance) - totalSpent > 0n ? BigInt(allowance) - totalSpent : 0n;
   return {
     token,
     gatekeeper,
@@ -161,7 +168,7 @@ export async function readPolicyRow(provider, { gatekeeper, token, adapter, asse
     adapterConfig,
     allowance,
     totalSpent: adapterConfig.totalSpent,
-    remainingBudget: remaining.toString(),
+    remainingBudget: remainingBudgetFromAllowance(allowance),
   };
 }
 

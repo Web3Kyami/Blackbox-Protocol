@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderHome } from "../src/ui/home.mjs";
 import { renderShell } from "../src/ui/shell.mjs";
 import { renderMandateDetail } from "../src/ui/mandate-detail.mjs";
@@ -44,12 +46,41 @@ test("delivery screen presents the real staged Mainnet actions", () => {
   assert.match(value, /Approve one pass/);
   assert.match(value, /Send private pass/);
   assert.doesNotMatch(value, /Pass delivered/);
+  assert.match(value, /Share operator link/);
 });
 
 test("operator surface asks for the wallet that received the pass", () => {
   const value = text(renderHolder({ view: "holder", wallet: null, holder: { token: "0x1", record: null, view: "input" } }));
-  assert.match(value, /Connect the same compatible wallet/);
+  assert.match(value, /Connect the wallet that received this permission/);
   assert.match(value, /Connect wallet/);
-  assert.match(value, /Check the pass in your wallet/);
-  assert.match(value, /Before you request payment/);
+  assert.match(value, /Payment permission ready/);
+  assert.doesNotMatch(value, /Before you request payment/);
+});
+
+test("deployment developer details cannot widen the review rail", () => {
+  const stylesheet = readFileSync(fileURLToPath(new URL("../src/ui/style.css", import.meta.url)), "utf8");
+  assert.match(stylesheet, /\.rail \{ min-width: 0;/);
+  assert.match(stylesheet, /\.technical-details \.rail-list \{[^}]*overflow-wrap: anywhere;/s);
+});
+
+test("mobile keeps every primary navigation destination and prevents narrow-screen overflow", () => {
+  const stylesheet = readFileSync(fileURLToPath(new URL("../src/ui/style.css", import.meta.url)), "utf8");
+  assert.doesNotMatch(stylesheet, /\.workspace-nav__item:nth-child\(4\)\s*\{\s*display:\s*none/);
+  assert.match(stylesheet, /@media \(max-width: 680px\)[\s\S]*html, body \{ overflow-x: hidden; \}/);
+  assert.match(stylesheet, /@media \(max-width: 420px\)[\s\S]*\.activation-progress \{ grid-template-columns: 1fr; \}/);
+});
+
+test("preview uses one stable application module for wallet-flow recovery", () => {
+  const buildScript = readFileSync(fileURLToPath(new URL("../scripts/build-preview.mjs", import.meta.url)), "utf8");
+  assert.match(buildScript, /splitting:\s*false/);
+  assert.doesNotMatch(buildScript, /chunkNames:\s*["']/);
+});
+
+test("the final responsive layer covers every Studio product surface", () => {
+  const stylesheet = readFileSync(fileURLToPath(new URL("../src/ui/style.css", import.meta.url)), "utf8");
+  assert.match(stylesheet, /Final responsive system/);
+  assert.match(stylesheet, /@media \(max-width: 1100px\)[\s\S]*\.workspace-nav[\s\S]*grid-template-columns: repeat\(4/);
+  assert.match(stylesheet, /@media \(max-width: 900px\)[\s\S]*\.home-hero \{ grid-template-columns: 1fr; \}/);
+  assert.match(stylesheet, /@media \(max-width: 760px\)[\s\S]*\.wizard[\s\S]*\.studio-summary[\s\S]*\.detail-grid[\s\S]*\.delivery-layout[\s\S]*\.hb-holder/);
+  assert.match(stylesheet, /\.hb-holder::before \{ display: none; content: none; \}/);
 });

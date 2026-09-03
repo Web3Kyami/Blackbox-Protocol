@@ -64,12 +64,55 @@ const MAINNET_MANDATES_KEY = "blackbox.studio.mainnet.mandates.v1";
 const MAINNET_DELIVERY_PREFIX = "blackbox.studio.mainnet.delivery.v1:";
 const MAINNET_HOLDER_PREFIX = "blackbox.studio.mainnet.holder.v1:";
 
+function renderPreservingActiveField(state) {
+  const active = document.activeElement;
+  const fieldName = active?.getAttribute?.("name") || "";
+  const selectionStart = typeof active?.selectionStart === "number" ? active.selectionStart : null;
+  const selectionEnd = typeof active?.selectionEnd === "number" ? active.selectionEnd : null;
+  appMount.setTree(appReRender(state));
+  if (!fieldName) return;
+  const restored = Array.from(document.getElementsByName(fieldName)).find((node) => node.closest("#studio"));
+  if (!restored) return;
+  restored.focus({ preventScroll: true });
+  if (selectionStart != null && typeof restored.setSelectionRange === "function") {
+    restored.setSelectionRange(selectionStart, selectionEnd ?? selectionStart);
+  }
+}
+
 function readMainnetProgress() {
   try { return JSON.parse(localStorage.getItem(MAINNET_PROGRESS_KEY) || "{}"); } catch { return {}; }
 }
 
 function saveMainnetProgress(progress) {
   try { localStorage.setItem(MAINNET_PROGRESS_KEY, JSON.stringify(progress || {})); } catch {}
+}
+
+async function refreshHolderRecord(token, networkConfig, fallback) {
+  try {
+    const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
+    return await loadHolderPolicy(token, { rpcUrl: networkConfig?.rpcUrl });
+  } catch {
+    // A confirmed receipt is stronger evidence than a transient follow-up RPC
+    // read. Keep the confirmed screen available and refresh again later.
+    return fallback;
+  }
+}
+
+async function preloadHolderPolicy(token, networkConfig) {
+  if (!token) return;
+  try {
+    const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
+    const record = await loadHolderPolicy(token, { rpcUrl: networkConfig?.rpcUrl });
+    if (appState?.view !== "holder" || appState.holder?.token !== token) return;
+    appState = {
+      ...appState,
+      holder: { ...appState.holder, record, view: "input", error: null, permissionChecked: false },
+    };
+    appMount?.setTree(appReRender(appState));
+  } catch {
+    // The explicit permission check reports read failures. Prefetch stays
+    // silent so a temporary endpoint issue does not replace the usable link.
+  }
 }
 
 function publicDraftSnapshot(draft = {}) {
@@ -186,18 +229,6 @@ function updateWalletLabel(wallet) {
 async function loadDashboard(org, networkConfig) {
   if (!org) return;
   const stored = readSavedMandates().filter((record) => String(record.treasury).toLowerCase() === String(org).toLowerCase());
-  const saved = await Promise.all(stored.map(async (record) => {
-    try {
-      const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
-      const refreshed = await Promise.race([
-        loadHolderPolicy(record.token, { ...networkConfig, gatekeeper: record.gatekeeper, adapter: record.adapter, asset: record.asset }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("refresh timeout")), 8000)),
-      ]);
-      const merged = { ...record, ...refreshed, links: { ...(record.links || {}), ...(refreshed.links || {}) } };
-      updateSavedMandate(record.token, merged);
-      return merged;
-    } catch { return record; }
-  }));
   try {
     const { indexOrgPolicies } = await import("../sdk/org-policy-indexer.mjs");
     const result = await Promise.race([
@@ -205,15 +236,18 @@ async function loadDashboard(org, networkConfig) {
       new Promise((_, reject) => setTimeout(() => reject(new Error("The network did not answer within 12 seconds. Check the network and try again.")), 12000)),
     ]);
     if (!appState) return;
-    const merged = [...saved, ...(result.records || []).filter((record) => !saved.some((item) => item.token === record.token))];
+    const merged = (result.records || []).map((record) => {
+      const local = stored.find((item) => item.token === record.token);
+      return local
+        ? { ...local, ...record, deliveryTransaction: local.deliveryTransaction || null, links: { ...(local.links || {}), ...(record.links || {}) } }
+        : record;
+    });
     appState = { ...appState, dashboard: { loading: false, error: null, index: mandateIndex(merged) } };
     if (appState.view === "dashboard") appMount.setTree(appReRender(appState));
   } catch (err) {
     if (!appState) return;
     const msg = err?.message || String(err);
-    appState = saved.length
-      ? { ...appState, dashboard: { loading: false, error: null, notice: "Showing mandates confirmed from this browser.", index: mandateIndex(saved) } }
-      : { ...appState, dashboard: { loading: false, error: msg, index: null } };
+    appState = { ...appState, dashboard: { loading: false, error: msg, index: null } };
     if (appState.view === "dashboard") appMount.setTree(appReRender(appState));
   }
 }
@@ -366,11 +400,73 @@ function boot() {
       if (event.type === "open-delivery") {
         const record = state.dashboard?.index?.records?.find((item) => item.token === event.token) || state.mandate;
         state = { ...state, view: "delivery", mandate: record || null, delivery: readDelivery(record?.token) };
-        appState = state; appMount.setTree(reRender(state)); return;
+        appState = state; appMount.setTree(reRender(state));
+        if (mainnetSession?.account && record?.token && !state.delivery?.completed) {
+          try {
+            const { deliveryApprovalStatus, findPrivatePassDelivery } = await import("../sdk/mainnet-actions.mjs");
+            const completed = await findPrivatePassDelivery(mainnetSession.address, record.token);
+            if (completed && appState?.view === "delivery" && appState?.mandate?.token === record.token) {
+              state = {
+                ...appState,
+                mandate: { ...appState.mandate, deliveryTransaction: completed.transactionHash },
+                delivery: {
+                  ...(appState.delivery || {}),
+                  pending: null,
+                  confirming: false,
+                  pendingDeliveryTransaction: null,
+                  completed: true,
+                  deliveryTransaction: completed.transactionHash,
+                  error: null,
+                },
+              };
+              saveDelivery(record.token, state.delivery);
+              updateSavedMandate(record.token, { deliveryTransaction: completed.transactionHash });
+              appState = state;
+              appMount.setTree(reRender(state));
+              return;
+            }
+            const approval = await deliveryApprovalStatus(mainnetSession.address, record.token);
+            if (appState?.view === "delivery" && appState?.mandate?.token === record.token) {
+              const recovered = approval.approved
+                ? {
+                    approvalBlock: appState.delivery?.approvalBlock || approval.observedAtBlock,
+                    approvalTransaction: appState.delivery?.approvalTransaction || "onchain-allowance",
+                    fee: approval.fee,
+                    recoveredApproval: true,
+                    error: null,
+                  }
+                : {
+                    approvalBlock: null,
+                    approvalTransaction: null,
+                    fee: approval.fee,
+                    recoveredApproval: false,
+                    error: appState.delivery?.approvalBlock
+                      ? "The required STRK20 fee allowance is not available. Approve delivery before sending the pass."
+                      : appState.delivery?.error || null,
+                  };
+              state = {
+                ...appState,
+                delivery: {
+                  ...(appState.delivery || {}),
+                  ...recovered,
+                },
+              };
+              saveDelivery(record.token, state.delivery);
+              appState = state;
+              appMount.setTree(reRender(state));
+            }
+          } catch {
+            // The normal approval button remains available if the read-only
+            // recovery check cannot reach Mainnet.
+          }
+        }
+        return;
       }
       if (event.type === "delivery-recipient") {
         state = { ...state, delivery: { ...(state.delivery || {}), recipient: event.value } };
-        appState = state; return;
+        appState = state;
+        renderPreservingActiveField(state);
+        return;
       }
 
       if (event.type === "mainnet-deploy-next") {
@@ -521,9 +617,9 @@ function boot() {
       if (event.type === "holder-amount") {
         const h0 = state.holder || {};
         const iss = h0.issuance || {};
-        state = { ...state, holder: { ...h0, issuance: { ...iss, fields: { ...(iss.fields || {}), amount: event.value } } } };
+        state = { ...state, holder: { ...h0, issuance: { ...iss, error: null, fields: { ...(iss.fields || {}), amount: event.value } } } };
         appState = state;
-        appMount.setTree(reRender(state));
+        renderPreservingActiveField(state);
         return;
       }
       if (event.type === "holder-check") {
@@ -537,12 +633,14 @@ function boot() {
           state = { ...state, holder: { ...h0, view: "error", error: "This operator link is missing its mandate address." } };
           appState = state; appMount.setTree(reRender(state)); return;
         }
-        state = { ...state, holder: { ...h0, view: "checking", record: null, permissionChecked: false, error: null } };
+        state = { ...state, holder: { ...h0, view: "checking", permissionChecked: false, error: null } };
         appState = state; appMount.setTree(reRender(state));
-        let record;
+        let record = h0.record;
         try {
-          const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
-          record = await loadHolderPolicy(token, { ...state.networkConfig, network: "mainnet" });
+          if (!record) {
+            const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
+            record = await loadHolderPolicy(token, { rpcUrl: state.networkConfig?.rpcUrl });
+          }
         } catch (error) {
           state = { ...state, holder: { ...h0, record: null, permissionChecked: false, view: "error", error: friendlyError(error, "The public mandate could not be loaded. Try again.") } };
           appState = state; appMount.setTree(reRender(state)); return;
@@ -552,17 +650,37 @@ function boot() {
           appState = state; appMount.setTree(reRender(state)); return;
         }
         try {
-          const [{ buildHolderAction }, { prepareHolderProof, atomicToStrk }] = await Promise.all([
+          const [{ buildHolderAction }, { prepareHolderProof, exerciseHolderPass, atomicToStrk }] = await Promise.all([
             import("../sdk/holder-action.mjs"), import("../sdk/mainnet-actions.mjs"),
           ]);
           const max = BigInt(record.maxFirstArg);
           const remaining = BigInt(record.remainingBudget);
           const checkAmount = max < remaining ? max : remaining;
+          const holderProgress = readHolderProgress(record.token);
+          const recoveredAmount = BigInt(holderProgress.amount || checkAmount);
+          if (holderProgress.completedTransaction) {
+            const confirmed = await exerciseHolderPass(mainnetSession.account, [], holderProgress);
+            const refreshedRecord = await refreshHolderRecord(record.token, state.networkConfig, record);
+            state = { ...state, holder: { ...h0, record: refreshedRecord, permissionChecked: true, view: "complete", error: null, issuance: { fields: { amount: atomicToStrk(recoveredAmount) }, receipt: { kind: "real", txHash: confirmed.transactionHash, recovered: true } } } };
+            appState = state; appMount.setTree(reRender(state)); return;
+          }
+          if (holderProgress.pendingTransaction) {
+            state = { ...state, holder: { ...h0, view: "confirming", record, permissionChecked: true, error: null, issuance: { fields: { amount: atomicToStrk(recoveredAmount) }, pendingTransaction: holderProgress.pendingTransaction } } };
+            appState = state; appMount.setTree(reRender(state));
+            try {
+              const confirmed = await exerciseHolderPass(mainnetSession.account, [], holderProgress);
+              saveHolderProgress(record.token, { completedTransaction: confirmed.transactionHash, amount: recoveredAmount.toString() });
+              const refreshedRecord = await refreshHolderRecord(record.token, state.networkConfig, record);
+              state = { ...state, holder: { ...h0, record: refreshedRecord, permissionChecked: true, view: "complete", error: null, issuance: { fields: { amount: atomicToStrk(recoveredAmount) }, receipt: { kind: "real", txHash: confirmed.transactionHash, recovered: true } } } };
+            } catch (error) {
+              state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "error", error: friendlyError(error), issuance: { fields: { amount: atomicToStrk(recoveredAmount) }, pendingTransaction: holderProgress.pendingTransaction, error: friendlyError(error) } } };
+            }
+            appState = state; appMount.setTree(reRender(state)); return;
+          }
           if (checkAmount <= 0n) throw new Error("This mandate has no remaining payment budget.");
           const actions = buildHolderAction(record, [checkAmount.toString()], mainnetSession.address);
           await prepareHolderProof(mainnetSession.account, actions);
-          const suggested = checkAmount < 10_000_000_000_000_000n ? checkAmount : 10_000_000_000_000_000n;
-          state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "loaded", error: null, issuance: { fields: { amount: atomicToStrk(suggested) } } } };
+          state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "loaded", error: null, issuance: { fields: { amount: atomicToStrk(checkAmount) }, error: null } } };
         } catch (error) {
           state = { ...state, holder: { ...h0, record: null, permissionChecked: false, view: "no-pass", error: "This wallet cannot prove it holds the private pass. Switch to the wallet that received it." } };
         }
@@ -576,26 +694,24 @@ function boot() {
         const amount = iss.fields?.amount || "0.01";
         try {
           if (!mainnetSession?.account || !h0.permissionChecked) throw new Error("Check this wallet's permission first.");
-          const [{ buildHolderAction }, { exerciseHolderPass, strkToAtomic }] = await Promise.all([
+          const [{ buildHolderAction }, { exerciseHolderPass, validateHolderAmount }] = await Promise.all([
             import("../sdk/holder-action.mjs"), import("../sdk/mainnet-actions.mjs"),
           ]);
-          const atomic = strkToAtomic(amount);
-          if (atomic <= 0n) throw new Error("Enter an amount greater than zero.");
-          if (atomic > BigInt(record.maxFirstArg)) throw new Error("The amount is above this mandate's per-payment maximum.");
-          if (atomic > BigInt(record.remainingBudget)) throw new Error("The amount is above the mandate's remaining budget.");
+          const atomic = validateHolderAmount(amount, record);
           const action = buildHolderAction(record, [atomic], mainnetSession.address);
           const holderProgress = readHolderProgress(record.token);
           const confirmed = await exerciseHolderPass(mainnetSession.account, action, holderProgress, (pending) => {
-            saveHolderProgress(record.token, pending);
+            saveHolderProgress(record.token, { ...pending, amount: atomic.toString() });
             state = { ...state, holder: { ...h0, view: "confirming", record, permissionChecked: true, issuance: { ...iss, pendingTransaction: pending.pendingTransaction } } };
             appState = state; appMount.setTree(reRender(state));
           });
-          saveHolderProgress(record.token, {});
+          saveHolderProgress(record.token, { completedTransaction: confirmed.transactionHash, amount: atomic.toString() });
           const receipt = { kind: "real", txHash: confirmed.transactionHash, confirmation: confirmed };
-          state = { ...state, holder: { ...h0, view: "complete", issuance: { ...iss, receipt, error: null } } };
+          const refreshedRecord = await refreshHolderRecord(record.token, state.networkConfig, record);
+          state = { ...state, holder: { ...h0, record: refreshedRecord, view: "complete", issuance: { ...iss, receipt, error: null } } };
           appState = state;
         } catch (err) {
-          state = { ...state, holder: { ...h0, view: "error", issuance: { ...iss, error: err?.message || String(err) }, error: err?.message || String(err) } };
+          state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "loaded", error: null, issuance: { ...iss, error: err?.message || String(err) } } };
           appState = state;
         }
         appMount.setTree(reRender(state));
@@ -643,11 +759,12 @@ function boot() {
       }
 
       state = reduce(state, event);
-      // Rebuilding the whole tree on every keystroke drops the active input
-      // and caret. Keep draft edits in state, then render them on navigation
-      // or an explicit action instead.
       if (event.type === "update-draft") {
+        // Draft edits change both the summary and whether Continue is enabled.
+        // Re-render immediately, then restore the active field and caret so the
+        // form stays responsive without interrupting typing.
         appState = state;
+        renderPreservingActiveField(state);
         return;
       }
       // When the user reaches the review step and we don't yet have
@@ -684,6 +801,7 @@ function boot() {
     walletDiscovery = found.store;
     availableWallets = found.wallets;
   }).catch(() => { availableWallets = []; });
+  if (sharedPolicy) preloadHolderPolicy(sharedPolicy, state.networkConfig);
 }
 
 // DOMContentLoaded is the safe entry point — the script is loaded

@@ -22,7 +22,31 @@ export {
 } from "./public-config.mjs";
 
 export const DEFAULT_MAINNET_RPC = "https://rpc.starknet.lava.build";
+export const FALLBACK_MAINNET_RPC = "https://starknet-rpc.publicnode.com";
 export const MAINNET_CHAIN_ID = "0x534e5f4d41494e";
+
+export function makeReadProvider(urls, createProvider = (nodeUrl) => new RpcProvider({ nodeUrl, chainId: MAINNET_CHAIN_ID })) {
+  const providers = [...new Set(urls.filter(Boolean))].map(
+    (nodeUrl) => createProvider(nodeUrl),
+  );
+  const read = async (method, args) => {
+    let lastError;
+    for (const provider of providers) {
+      try {
+        return await provider[method](...args);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("No Mainnet RPC is configured.");
+  };
+  return Object.freeze({
+    callContract: (...args) => read("callContract", args),
+    getEvents: (...args) => read("getEvents", args),
+    getTransactionReceipt: (...args) => read("getTransactionReceipt", args),
+    getBlockNumber: (...args) => read("getBlockNumber", args),
+  });
+}
 
 export function makeNetworkProvider(options = {}) {
   const legacyRpc = typeof options === "string" ? options : null;
@@ -30,7 +54,7 @@ export function makeNetworkProvider(options = {}) {
   const url = legacyRpc || config.rpcUrl ||
     (typeof window !== "undefined" ? new URL(window.location.href).searchParams.get("rpc") : null) ||
     DEFAULT_MAINNET_RPC;
-  return new RpcProvider({ nodeUrl: url, chainId: MAINNET_CHAIN_ID });
+  return makeReadProvider([url, FALLBACK_MAINNET_RPC]);
 }
 
 // Explorer link builders — pure functions.

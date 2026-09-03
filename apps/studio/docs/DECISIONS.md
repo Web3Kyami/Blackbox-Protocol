@@ -1179,3 +1179,31 @@ JavaScript. The same output is now used for local browser verification.
 
 **Source:** `scripts/build-preview.mjs`, `scripts/serve-preview.mjs`,
 `package.json`, `vercel.json`.
+
+## S055 — Current allowance is the remaining treasury budget (2026-09-02)
+
+**Status:** active.
+
+**Decision:** Studio displays the TreasurySpendAdapter's current STRK allowance
+as remaining budget. It keeps `totalSpent` as history and never subtracts it from
+the already reduced allowance.
+
+**Reason:** ERC-20 `transfer_from` reduces allowance when each payment succeeds.
+Subtracting cumulative spending again understates the remaining budget.
+
+**Source:** `src/sdk/policy-reads.mjs`,
+`test/phase-5-dashboard.test.mjs`.
+
+## S056 — Confirmed holder payments recover as completed (2026-09-02)
+
+**Status:** active.
+
+**Decision:** Studio stores a confirmed holder transaction hash and amount. A
+refresh rechecks that receipt and restores the completed screen. Pending or
+failed hashes are never replaced automatically with a new payment.
+
+**Reason:** a reusable permission must not turn an ordinary page refresh into an
+accidental duplicate treasury payment.
+
+**Source:** `src/sdk/mainnet-actions.mjs`, `src/ui/app.mjs`,
+`src/ui/holder.mjs`, `test/mainnet-product.test.mjs`.

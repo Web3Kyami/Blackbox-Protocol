@@ -48,12 +48,15 @@ export function renderPassDelivery(state = {}) {
           ]),
         ]),
         delivery.error ? h("div", { class: "delivery-blocker" }, [h("strong", {}, ["Action needs attention"]), h("p", {}, [delivery.error])]) : null,
-        delivery.completed ? h("div", { class: "delivery-success" }, [
-          h("strong", {}, ["Private pass delivered"]),
-          h("p", {}, [delivery.shareCopied ? "Operator link copied." : "Copy the operator link and send it to the pass holder."]),
-          delivery.shareUrl ? h("input", { class: "share-link-field", type: "text", readonly: "readonly", value: delivery.shareUrl, "aria-label": "Operator link" }) : null,
-          h("button", { class: "btn btn--primary", onclick: { type: "dashboard-action", action: "share", token: record?.token } }, [delivery.shareCopied ? "Copy again" : "Copy operator link"]),
-        ]) : null,
+        h("div", { class: `delivery-step${delivery.completed ? " delivery-step--active" : ""}` }, [
+          h("span", {}, ["4"]),
+          h("div", {}, [
+            h("strong", {}, ["Share operator link"]),
+            h("p", {}, [delivery.completed ? "The pass is delivered. Send this public mandate link to the operator." : "Available after the private-pass transaction succeeds."]),
+            delivery.completed && delivery.shareUrl ? h("input", { class: "share-link-field", type: "text", readonly: "readonly", value: delivery.shareUrl, "aria-label": "Operator link" }) : null,
+            delivery.completed ? h("button", { class: "btn btn--primary", onclick: { type: "dashboard-action", action: "share", token: record?.token } }, [delivery.shareCopied ? "Copy again" : "Copy operator link"]) : null,
+          ]),
+        ]),
       ]),
       h("aside", { class: "mandate-sheet" }, [
         h("span", { class: "mandate-sheet__eyebrow" }, ["PASS CONTENT"]),
@@ -63,7 +66,6 @@ export function renderPassDelivery(state = {}) {
           h("div", {}, [h("dt", {}, ["Maximum"]), h("dd", {}, [`${formatTokenAmount(record?.maxFirstArg, record?.tokenSymbol)} ${record?.tokenSymbol || "STRK"}`])]),
           h("div", {}, [h("dt", {}, ["Operator wallet"]), h("dd", { class: "studio-mono" }, [short(delivery.recipient)])]),
         ]),
-        delivery.completed ? h("button", { class: "btn btn--secondary", onclick: { type: "dashboard-action", action: "share", token: record?.token } }, ["Copy operator link"]) : null,
       ]),
     ]),
   ]);

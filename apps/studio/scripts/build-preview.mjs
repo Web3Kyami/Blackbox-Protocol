@@ -1,12 +1,11 @@
 // Build the standalone browser entry with its installed Starknet dependency.
 // This is a local preview artifact only: no deploy, wallet, or network write.
 import { build } from "esbuild";
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const studioRoot = fileURLToPath(new URL("../", import.meta.url));
 const outdir = fileURLToPath(new URL("../preview/", import.meta.url));
-await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 // Verified public Mainnet reference configuration. New mandate receipts replace
 // the gatekeeper and adapter in browser state after deployment.
@@ -29,9 +28,10 @@ await build({
   minify: true,
   outdir,
   entryNames: "app",
-  chunkNames: "chunks/[name]-[hash]",
   outExtension: { ".js": ".mjs" },
-  splitting: true,
+  // Emit one stable module so an open wallet session cannot lose a generated
+  // flow chunk when the local preview is rebuilt.
+  splitting: false,
   platform: "browser",
   sourcemap: true,
   target: "es2022",

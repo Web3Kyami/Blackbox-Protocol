@@ -11,10 +11,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { renderHolder } from "../src/ui/holder.mjs";
-import { holderLink, policyExport } from "../src/sdk/holder-reads.mjs";
+import { holderLink, loadHolderPolicy, policyExport } from "../src/sdk/holder-reads.mjs";
 import { buildHolderAction } from "../src/sdk/holder-action.mjs";
 import { buildWalletApiCapabilityActions } from "../src/sdk/blackbox-capability-sdk.mjs";
 import { classifyPolicy } from "../src/sdk/org-policy-indexer.mjs";
+import { makeReadProvider } from "../src/sdk/studio-network.mjs";
 
 const BBP = "0x6285daa14a51a8b8c325f30289c03927514800cec0206ecf37f3f49694870e9";
 const GATEKEEPER = "0x226b161a1e762b0f15dd7e73f3fe182e0a6596e202e6307a014ace42e7b4282";
@@ -77,7 +78,7 @@ test("every operator control is connected to a browser event", () => {
 test("renderHolder shows the token input when no record is loaded", () => {
   const tree = renderHolder({ view: "holder", holder: { token: "", record: null, view: "input" } });
   const html = JSON.stringify(tree);
-  assert.match(html, /Use a treasury permission/);
+  assert.match(html, /Request an approved payment/);
   assert.match(html, /Connect wallet/);
   assert.match(html, /Back/);
   assert.match(JSON.stringify(renderHolder({ view: "holder", holder: { token: BBP, record: null, view: "checking" } })), /Checking your permission/);
@@ -91,7 +92,11 @@ test("renderHolder shows the token input when no record is loaded", () => {
       issuance: { fields: { amount: "1" }, receipt: { kind: "real", txHash: "0x123" } },
     },
   });
-  assert.match(JSON.stringify(complete), /Payment confirmed/);
+  const completeHtml = JSON.stringify(complete);
+  assert.match(completeHtml, /PAYMENT CONFIRMED/);
+  assert.match(completeHtml, /Remaining treasury allowance/);
+  assert.match(completeHtml, /https:\/\/voyager\.online\/tx\/0x123/);
+  assert.doesNotMatch(completeHtml, /Request payment/);
 });
 
 test("renderHolder only claims public policy states", () => {
@@ -115,6 +120,25 @@ test("renderHolder only shows the request panel when the public policy is active
   const expired = JSON.stringify(renderHolder({ view: "holder", wallet: { address: "0x1" }, holder: { record: fakeRecord({ state: "expired" }), view: "loaded", permissionChecked: true } }));
   assert.match(ready, /Request the approved payment/);
   assert.doesNotMatch(expired, /Request the approved payment/);
+});
+
+test("payment editing uses a stable decimal field and keeps validation inline", () => {
+  const state = {
+    view: "holder",
+    wallet: { address: "0x1" },
+    holder: {
+      record: fakeRecord({ state: "active" }),
+      view: "loaded",
+      permissionChecked: true,
+      issuance: { fields: { amount: "0.005" }, error: "Enter an amount greater than zero." },
+    },
+  };
+  const value = JSON.stringify(renderHolder(state));
+  assert.match(value, /holder-payment-amount/);
+  assert.match(value, /inputmode.*decimal/);
+  assert.match(value, /0\.005/);
+  assert.match(value, /Enter an amount greater than zero/);
+  assert.doesNotMatch(value, /Could not continue/);
 });
 
 test("classifyPolicy treats expiresAt=0 as never-expiring", () => {
@@ -160,4 +184,58 @@ test("holder links use the documented public policy identifier and exports exclu
   assert.equal(exported.token, BBP);
   assert.equal(exported.holderLink, link);
   assert.equal(JSON.stringify(exported).match(/note|proof|viewing|private/i), null);
+});
+
+test("Mainnet reads fall back when the primary RPC is unavailable", async () => {
+  const attempts = [];
+  const provider = makeReadProvider(["primary", "fallback"], (name) => ({
+    async callContract(request) {
+      attempts.push([name, request]);
+      if (name === "primary") throw new Error("temporary RPC failure");
+      return ["0x1"];
+    },
+  }));
+  assert.deepEqual(await provider.callContract({ contractAddress: "0x1" }), ["0x1"]);
+  assert.deepEqual(attempts.map(([name]) => name), ["primary", "fallback"]);
+});
+
+test("holder links resolve their own contracts and ignore unrelated runtime defaults", async () => {
+  const token = "0x101";
+  const gatekeeper = "0x202";
+  const adapter = "0x303";
+  const asset = "0x404";
+  const issuer = "0x505";
+  const recipient = "0x606";
+  const provider = {
+    async callContract({ contractAddress, entrypoint }) {
+      if (contractAddress === token) {
+        if (entrypoint === "name") return ["0x424258"];
+        if (entrypoint === "symbol") return ["0x42425853"];
+        if (entrypoint === "total_supply") return ["0x1", "0x0"];
+        if (entrypoint === "get_issuer") return [issuer];
+        if (entrypoint === "get_privacy_pool") return ["0x707"];
+        if (entrypoint === "get_gatekeeper") return [gatekeeper];
+      }
+      if (contractAddress === gatekeeper && entrypoint === "get_policy") {
+        return [issuer, adapter, "0x1", "0x1", "0x2386f26fc10000", "0x77359400", "0x1", "0x1", "0x0"];
+      }
+      if (contractAddress === adapter) {
+        if (entrypoint === "get_config") return [gatekeeper, issuer, asset, recipient];
+        if (entrypoint === "get_total_spent") return ["0x0", "0x0"];
+      }
+      if (contractAddress === asset && entrypoint === "allowance") return ["0x6a94d74f430000", "0x0"];
+      throw new Error(`unexpected read ${contractAddress}.${entrypoint}`);
+    },
+  };
+
+  const record = await loadHolderPolicy(token, {
+    provider,
+    gatekeeper: "0xdead",
+    adapter: "0xbeef",
+    asset: "0xbad",
+  });
+  assert.equal(record.gatekeeper, gatekeeper);
+  assert.equal(record.adapter, adapter);
+  assert.equal(record.asset, asset);
+  assert.equal(record.state, "active");
 });

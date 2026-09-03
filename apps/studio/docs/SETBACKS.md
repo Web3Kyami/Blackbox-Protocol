@@ -420,3 +420,191 @@ contracts were correct; only the Studio read code had to learn their real shape.
   the lockfile. The next production deployment completed successfully.
 - **Prevention:** deployment tooling used directly by a package must be declared
   by that package, even when a monorepo parent happens to provide it locally.
+
+## Completion and recovery audit setbacks (2026-09-02)
+
+### S-34 — Remaining budget was reduced twice
+
+- **Symptom:** after a successful payment, Studio subtracted total spending from
+  an ERC-20 allowance that had already been reduced by `transfer_from`.
+- **Fix:** treat the current allowance as the remaining hard payment budget and
+  show total spending separately as history.
+- **Prevention:** a regression covers successive allowance values after each
+  payment.
+
+### S-35 — A completed payment could be offered again after refresh
+
+- **Symptom:** Studio cleared holder progress after confirmation. A reusable
+  permission could therefore return to the payment form after refresh.
+- **Fix:** retain the confirmed transaction hash and amount, verify that receipt
+  on recovery, and restore a completion view with no payment button.
+- **Prevention:** recovery tests prove pending, failed, and completed hashes do
+  not submit replacement payments.
+
+### S-36 — Generated Vercel metadata failed source formatting
+
+- **Symptom:** local `.vercel` metadata was included in the repository-wide
+  whitespace scan even though Vercel generates and controls it.
+- **Fix:** exclude `.vercel` in the same narrow directory ignore used for other
+  generated output.
+- **Prevention:** source directories and supported source extensions remain
+  unchanged and fully checked.
+
+### S-37 — Continue stayed disabled after valid form input
+
+- **Symptom:** the form saved field edits but the visible summary and Continue
+  button retained their previous state.
+- **Root cause:** draft edits intentionally skipped rendering to preserve the
+  input caret, which also prevented validation-dependent controls from updating.
+- **Fix:** render after every draft edit, then restore focus and the caret to the
+  active field.
+- **Prevention:** validation state and its visible controls must update in the
+  same interaction that changes the field.
+
+### S-38 — Developer details widened the deployment page
+
+- **Symptom:** full class hashes and constructor calldata escaped the narrow
+  review rail and created horizontal page overflow.
+- **Fix:** constrain the rail and details card, then allow long technical values
+  to wrap at any safe character boundary.
+- **Prevention:** interface tests require the rail containment and wrapping
+  rules to remain present.
+
+### S-39 — Delivery recipient appeared unsaved
+
+- **Symptom:** the operator address was stored internally, while the pass card
+  continued to show a dash and made the delivery flow appear stuck.
+- **Root cause:** the delivery field updated state without refreshing its
+  validation-dependent interface.
+- **Fix:** refresh the delivery view after each edit and preserve field focus
+  and caret position through the shared form-render helper.
+- **Prevention:** every field that controls a visible next step must refresh
+  that step in the same interaction.
+
+### S-40 — An open preview lost a dynamically imported module
+
+- **Symptom:** an open Studio tab failed to load a hashed module immediately
+  after another preview build.
+- **Root cause:** the build deleted the complete output directory before
+  writing the new bundle, while the open page still referenced the previous
+  chunk name.
+- **Fix:** local rebuilds retain prior hashed chunks and overwrite the current
+  entry files. The preview server sends `Cache-Control: no-store`.
+- **Prevention:** production builds still begin from a clean checkout, while a
+  running local preview no longer loses modules during development.
+
+### S-41 — Treasury discovery depended on one browser
+
+- **Symptom:** a valid Mainnet mandate disappeared from the treasury list when
+  the user changed browser origin or device.
+- **Root cause:** Studio used browser storage as its discovery source because
+  every mandate has its own Gatekeeper instance.
+- **Fix:** scan Mainnet UDC events for CapabilityToken deployments made by the
+  connected treasury, then resolve each token's own Gatekeeper, adapter, asset,
+  and policy from contract views.
+- **Prevention:** browser storage may enrich delivery recovery, but it cannot
+  create or hide treasury mandate rows.
+
+### S-42 — Form cards animated on every keystroke
+
+- **Symptom:** the entire wizard appeared to shake while a user typed.
+- **Root cause:** the workspace entrance animation replayed whenever validation
+  replaced the rendered form tree.
+- **Fix:** keep the entrance animation on the Studio home only. Interactive
+  screens update without page-level motion.
+- **Prevention:** animations must not be attached to nodes replaced by ordinary
+  form-state updates.
+
+### S-43 — Saved approval outlived its onchain allowances
+
+- **Symptom:** pass delivery showed `Approved` from local recovery data while
+  Mainnet no longer had both allowances required by the pool.
+- **Fix:** re-read the one-pass and STRK fee allowances whenever delivery opens.
+  Missing allowance clears the approved state and blocks private delivery.
+- **Prevention:** current contract state overrides cached completion markers for
+  every action that has not yet produced a successful delivery receipt.
+
+### S-44 — Wallet-completed delivery was not reflected in Studio
+
+- **Symptom:** the wallet completed private delivery after an internal funding
+  interruption, while the open Studio page still showed `Send private pass`.
+- **Fix:** recover the public treasury-to-pool capability-token transfer, verify
+  its transaction receipt, and restore the completed share-link step.
+- **Prevention:** a missing browser callback cannot turn a confirmed onchain
+  delivery into another enabled delivery action.
+
+### S-45 — Runtime defaults overrode the linked policy wiring
+
+- **Symptom:** the valid operator link reported that no active policy existed.
+- **Evidence:** the linked token resolved successfully through two independent
+  public Mainnet RPCs, with the expected Gatekeeper, adapter, allowance, and
+  zero uses.
+- **Root cause:** the operator page correctly read the capability token, then
+  replaced its Gatekeeper and adapter with addresses from the older reference
+  deployment in runtime configuration. The resulting lookup asked the wrong
+  Gatekeeper for the policy. The first direct diagnostic missed this because
+  it did not reproduce the browser's runtime options.
+- **Fix:** holder loading always derives Gatekeeper, adapter, and asset from the
+  linked token and its onchain policy. Runtime configuration may select the RPC
+  only. Read calls also retry through a second public endpoint.
+- **Prevention:** a regression passes deliberately incorrect runtime contract
+  defaults and proves the linked token still resolves its own contract graph.
+
+### S-46 — Mobile navigation covered the operator page
+
+- **Symptom:** at phone width, the bottom navigation inherited the desktop
+  sidebar height and covered nearly the full screen. Create mandate was also
+  intentionally hidden by an older rule.
+- **Fix:** lock the mobile navigation to 64 pixels, retain all four primary
+  destinations, make the holder surface fill the available width, and wrap
+  long values and actions safely.
+- **Prevention:** responsive checks now assert that navigation is retained and
+  narrow layouts cannot create horizontal overflow.
+
+### S-47 — An open operator tab requested a replaced build chunk
+
+- **Symptom:** the operator flow could not continue because its older entry
+  module requested a generated `holder-reads` chunk that was no longer present.
+- **Root cause:** Studio split lazy flows into content-hashed files. A rebuild
+  could leave an already-open wallet session tied to the previous chunk graph.
+- **Fix:** the self-contained preview now emits one stable `app.mjs` module.
+- **Prevention:** build coverage rejects split-chunk configuration for Studio.
+
+### S-48 — Holder amount edits reset and validation escaped to the wallet
+
+- **Symptom:** editing the default payment amount rebuilt the input on every
+  keystroke, so it could not be cleared or replaced. Invalid values moved the
+  whole operator screen into an error state and could appear only after a
+  wallet window opened.
+- **Root cause:** the holder field did not use Studio's focus-preserving render
+  path, and exercise errors shared the page-level policy error state.
+- **Fix:** use a stable decimal text field, preserve its cursor, validate the
+  amount before wallet submission, and render errors beneath the field while
+  retaining the checked policy and wallet session. The initial amount now uses
+  the policy maximum rather than an unrelated fixed suggestion.
+- **Performance:** Studio preloads the public policy from the operator link.
+  Ready still needs time to discover the private note and prepare its proof;
+  the interface now identifies that 5 to 10 second wallet-owned stage.
+- **Prevention:** regressions cover smaller valid payments, zero, malformed
+  amounts, above-cap values, stable field semantics, and inline errors.
+
+### S-49 — Two style generations produced inconsistent responsive behavior
+
+- **Symptom:** desktop, tablet, and phone layouts disagreed about navigation,
+  column collapse, spacing, and component widths. The 768-pixel home squeezed
+  its heading beside the authority diagram, while earlier breakpoint rules
+  were later overridden by the Authority Ledger layer.
+- **Root cause:** the original product-shell media queries remained above the
+  newer visual system. Both were valid in isolation, but cascade order made the
+  final behavior depend on the viewport and selector specificity.
+- **Fix:** add one authoritative responsive layer after the visual system. It
+  covers the shell, home, wizard, review rail, dashboard, mandate details, pass
+  delivery, holder flow, and wallet dialog at desktop, tablet, phone, and narrow
+  phone widths. Tablet navigation collapses before content becomes cramped;
+  forms and actions become deliberate single-column layouts on phones.
+- **Copy correction:** removed the internal `Operator link` and `Operator
+  terminal / permission check` labels plus the repeated four-step operator
+  guide. The holder page now leads directly with the payment task.
+- **Verification:** rendered checks were completed at 320, 390, 768, and 1024
+  pixels. Automated coverage requires the final layer to include every major
+  Studio surface and retain all four mobile navigation destinations.
