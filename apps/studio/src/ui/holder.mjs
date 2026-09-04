@@ -62,7 +62,10 @@ function exercisePanel(policyState, state, record) {
     return el("section", { class: "hb-exercise hb-exercise--complete" }, [
       el("span", { class: "studio-kicker" }, ["PAYMENT CONFIRMED"]),
       el("h3", {}, [`${fields.amount || "0"} ${record?.tokenSymbol || "STRK"} sent`]),
-      el("p", {}, [`Remaining treasury allowance: ${remaining} ${record?.tokenSymbol || "STRK"}`]),
+      el("p", {}, ["The treasury payment was confirmed on Mainnet."]),
+      record?.postPaymentStateVerified !== false
+        ? el("p", {}, [`Remaining treasury allowance: ${remaining} ${record?.tokenSymbol || "STRK"}`])
+        : null,
       el("a", {
         class: "hb-btn hb-btn--primary",
         href: `https://voyager.online/tx/${iss.receipt.txHash}`,
@@ -103,7 +106,7 @@ export function renderHolder(state) {
   if (hstate.view === "loading" || hstate.view === "checking" || hstate.view === "confirming") {
     children.push(el("section", { class: "hb-load hb-load--loading" }, [
       el("strong", {}, [hstate.view === "confirming" ? "Confirming payment" : hstate.view === "checking" ? "Checking your permission" : "Loading mandate"]),
-      el("p", {}, [hstate.view === "confirming" ? "Your wallet submitted the request. Waiting for Mainnet confirmation." : hstate.view === "checking" ? "Your wallet is preparing the private proof. This usually takes 5 to 10 seconds." : "Reading the public payment rule."]),
+      el("p", {}, [hstate.view === "confirming" ? "Payment submitted. You can safely refresh while it confirms." : hstate.view === "checking" ? "Your wallet is checking the private permission." : "Loading the payment rule."]),
     ]));
   } else if (hstate.view === "error" || hstate.view === "no-pass") {
     children.push(el("section", { class: "hb-load hb-load--error" }, [

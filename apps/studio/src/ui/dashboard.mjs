@@ -14,7 +14,7 @@
 // Lifecycle states shown: active, expired, revoked, draft. Each record shows:
 //   - state chip
 //   - token symbol / name + address (explorer link)
-//   - budget (allowance - total_spent = remaining), uses, expiry
+//   - current allowance as remaining budget, uses, expiry
 //   - treasury / recipient / adapter / gatekeeper addresses (explorer links)
 //   - register receipt link (explorer)
 //   - public-data actions: Export and Share

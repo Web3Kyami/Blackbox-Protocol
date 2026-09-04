@@ -36,7 +36,7 @@ export function renderPassDelivery(state = {}) {
           h("div", {}, [
             h("strong", {}, ["Approve delivery"]),
             h("p", {}, ["Approve one pass and the separate STRK20 pool fee. Review both amounts in your wallet."]),
-            h("button", { class: "btn btn--secondary", disabled: !issuerReady || !delivery.recipient || delivery.pending || delivery.approvalBlock ? "disabled" : null, onclick: { type: "mainnet-approve-delivery" } }, [delivery.pending === "approve" ? (delivery.confirming ? "Confirming onchain" : "Waiting for wallet") : delivery.approvalBlock ? "Approved" : delivery.pendingApprovalTransaction ? "Resume approval check" : "Approve one pass"]),
+            h("button", { class: "btn btn--secondary", disabled: !issuerReady || !delivery.recipient || delivery.pending || delivery.approvalBlock ? "disabled" : null, onclick: { type: "mainnet-approve-delivery" } }, [delivery.pending === "approve" ? (delivery.confirming ? "Confirming transaction" : "Approve in wallet") : delivery.approvalBlock ? "Approved" : delivery.pendingApprovalTransaction ? "Resume approval check" : "Approve one pass"]),
           ]),
         ]),
         h("div", { class: `delivery-step${delivery.completed ? " delivery-step--active" : ""}` }, [
@@ -44,7 +44,7 @@ export function renderPassDelivery(state = {}) {
           h("div", {}, [
             h("strong", {}, ["Send private pass"]),
             h("p", {}, ["Your wallet creates the proof and sends the pass."]),
-            h("button", { class: "btn btn--primary", disabled: !issuerReady || !delivery.approvalBlock || delivery.pending || delivery.completed ? "disabled" : null, onclick: { type: "mainnet-deliver-pass" } }, [delivery.pending === "deliver" ? (delivery.confirming ? "Confirming onchain" : "Waiting for wallet") : delivery.completed ? "Pass delivered" : delivery.pendingDeliveryTransaction ? "Resume delivery check" : "Send private pass"]),
+            h("button", { class: "btn btn--primary", disabled: !issuerReady || !delivery.approvalBlock || delivery.pending || delivery.completed ? "disabled" : null, onclick: { type: "mainnet-deliver-pass" } }, [delivery.pending === "deliver" ? (delivery.confirming ? "Confirming transaction" : "Approve in wallet") : delivery.completed ? "Pass delivered" : delivery.pendingDeliveryTransaction ? "Resume delivery check" : "Send private pass"]),
           ]),
         ]),
         delivery.error ? h("div", { class: "delivery-blocker" }, [h("strong", {}, ["Action needs attention"]), h("p", {}, [delivery.error])]) : null,

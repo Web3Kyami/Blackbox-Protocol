@@ -37,6 +37,7 @@ import { renderShell } from "./shell.mjs";
 import { renderMandateDetail } from "./mandate-detail.mjs";
 import { renderPassDelivery } from "./pass-delivery.mjs";
 import { readRuntimeNetworkConfig } from "../sdk/public-config.mjs";
+import { readUiRecovery, writeUiRecovery } from "./recovery.mjs";
 
 // Phase 5 — map app state into the dashboard render shape.
 function dashboardState(s) {
@@ -63,6 +64,12 @@ const MAINNET_PROGRESS_KEY = "blackbox.studio.mainnet.deployment.v1";
 const MAINNET_MANDATES_KEY = "blackbox.studio.mainnet.mandates.v1";
 const MAINNET_DELIVERY_PREFIX = "blackbox.studio.mainnet.delivery.v1:";
 const MAINNET_HOLDER_PREFIX = "blackbox.studio.mainnet.holder.v1:";
+const STUDIO_UI_RECOVERY_KEY = "blackbox.studio.ui.recovery.v1";
+
+function saveUiRecovery(state) {
+  if (!state) return;
+  writeUiRecovery(localStorage, STUDIO_UI_RECOVERY_KEY, state);
+}
 
 function renderPreservingActiveField(state) {
   const active = document.activeElement;
@@ -90,11 +97,13 @@ function saveMainnetProgress(progress) {
 async function refreshHolderRecord(token, networkConfig, fallback) {
   try {
     const { loadHolderPolicy } = await import("../sdk/holder-reads.mjs");
-    return await loadHolderPolicy(token, { rpcUrl: networkConfig?.rpcUrl });
+    const record = await loadHolderPolicy(token, { rpcUrl: networkConfig?.rpcUrl });
+    return { ...record, postPaymentStateVerified: true };
   } catch {
     // A confirmed receipt is stronger evidence than a transient follow-up RPC
-    // read. Keep the confirmed screen available and refresh again later.
-    return fallback;
+    // read. Keep the confirmed screen available, but do not present the stale
+    // pre-payment allowance as if it were the updated onchain value.
+    return { ...fallback, postPaymentStateVerified: false };
   }
 }
 
@@ -206,7 +215,15 @@ function friendlyError(error, fallback = "The wallet could not complete this act
   const raw = error?.message || String(error || "");
   if (/reject|cancel|denied/i.test(raw)) return "Request cancelled. Nothing was sent.";
   if (/insufficient|balance|fee/i.test(raw)) return "This wallet does not have enough STRK to cover the amount and network fee.";
-  return raw || fallback;
+  if (/fetch|network|timeout|timed out|rpc|dynamically imported module/i.test(raw)) {
+    return "The network is taking longer than expected. Your progress is saved. Try again.";
+  }
+  if (/invalid_request_payload|paymaster|transaction_execution_error|unknown_error/i.test(raw)) {
+    return "The wallet could not process this request. Your progress is saved. Try again.";
+  }
+  if (/^Wait \d+ more Mainnet block/i.test(raw)) return raw;
+  if (/valid Starknet wallet|remaining payment budget|per-payment maximum|greater than zero/i.test(raw)) return raw;
+  return fallback;
 }
 
 function mandateIndex(records) {
@@ -264,18 +281,32 @@ function boot() {
   }
 
   const savedProgress = readMainnetProgress();
+  const recoveredUi = readUiRecovery(localStorage, STUDIO_UI_RECOVERY_KEY);
   let state = initialState({
     networkConfig: readRuntimeNetworkConfig(),
-    draft: savedProgress?.publicDraft || undefined,
+    draft: savedProgress?.publicDraft || recoveredUi?.draft || undefined,
   });
   // Phase 5 — view switch: "wizard" (default) or "dashboard".
   const url = new URL(window.location.href);
   const sharedPolicy = url.searchParams.get("policy");
+  const recoveredView = recoveredUi?.view || "home";
+  const safeRecoveredView = ["mandate", "delivery"].includes(recoveredView) && !recoveredUi?.mandate
+    ? "dashboard"
+    : recoveredView;
+  const restoredView = sharedPolicy ? "holder" : safeRecoveredView;
+  const restoredMandate = recoveredUi?.mandate || null;
+  const restoredHolderToken = sharedPolicy || recoveredUi?.holderToken || "";
   state = {
     ...state,
-    view: sharedPolicy ? "holder" : "home",
+    view: restoredView,
+    step: recoveredUi?.step ?? state.step,
+    acknowledgedBoundary: recoveredUi?.acknowledgedBoundary === true,
+    plan: recoveredUi?.plan || null,
+    planError: recoveredUi?.planError || null,
+    mandate: restoredMandate,
     dashboard: { loading: false, error: null, index: null, notice: null },
-    holder: sharedPolicy ? { token: sharedPolicy, record: null, error: null, view: "input" } : null,
+    holder: restoredView === "holder" ? { token: restoredHolderToken, record: null, error: null, view: "input" } : null,
+    delivery: restoredView === "delivery" ? readDelivery(restoredMandate?.token) : null,
     mainnet: { deployment: savedProgress, pending: null, error: null, lastTransaction: null },
     walletPicker: { open: false, options: [] },
   };
@@ -345,6 +376,7 @@ function boot() {
           console.error("Studio: wallet connection failed:", err?.message || err);
           state = reduce(state, { type: "connect-wallet", address: null });
           state = { ...state, walletPicker: { open: true, options: availableWallets.map((wallet) => ({ name: wallet.name })), error: friendlyError(err) } };
+          appState = state;
         }
         appMount.setTree(reRender(state));
         updateWalletLabel(state.wallet);
@@ -464,6 +496,7 @@ function boot() {
       }
       if (event.type === "delivery-recipient") {
         state = { ...state, delivery: { ...(state.delivery || {}), recipient: event.value } };
+        saveDelivery(state.mandate?.token, state.delivery);
         appState = state;
         renderPreservingActiveField(state);
         return;
@@ -503,7 +536,7 @@ function boot() {
             state = { ...state, mandate: record, view: "mandate", networkConfig: { ...state.networkConfig, network: "mainnet", gatekeeper: deployment.gatekeeper, adapter: deployment.adapter } };
           }
         } catch (error) {
-          state = { ...state, mainnet: { ...state.mainnet, pending: null, error: error?.message || String(error) } };
+          state = { ...state, mainnet: { ...state.mainnet, pending: null, error: friendlyError(error, "This step could not be confirmed. Your progress is saved. Try again.") } };
         }
         appState = state; appMount.setTree(reRender(state)); return;
       }
@@ -677,6 +710,30 @@ function boot() {
             }
             appState = state; appMount.setTree(reRender(state)); return;
           }
+          if (holderProgress.intent) {
+            const { recoverSubmittedPayment } = await import("../sdk/mainnet-actions.mjs");
+            const countersAdvanced = BigInt(record.uses || 0) > BigInt(holderProgress.intent.usesBefore || 0)
+              || BigInt(record.totalSpent || 0) >= BigInt(holderProgress.intent.totalSpentBefore || 0) + BigInt(holderProgress.intent.amount || 0);
+            let recovered = null;
+            try {
+              recovered = await recoverSubmittedPayment(record, holderProgress.intent);
+            } catch (error) {
+              if (countersAdvanced) {
+                state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "error", error: "A payment may already be confirmed. Try again to recover its receipt before requesting another payment." } };
+                appState = state; appMount.setTree(reRender(state)); return;
+              }
+            }
+            if (recovered) {
+              saveHolderProgress(record.token, { completedTransaction: recovered.transactionHash, amount: holderProgress.intent.amount });
+              const refreshedRecord = { ...record, postPaymentStateVerified: true };
+              state = { ...state, holder: { ...h0, record: refreshedRecord, permissionChecked: true, view: "complete", error: null, issuance: { fields: { amount: atomicToStrk(holderProgress.intent.amount) }, receipt: { kind: "real", txHash: recovered.transactionHash, recovered: true } } } };
+              appState = state; appMount.setTree(reRender(state)); return;
+            }
+            if (countersAdvanced) {
+              state = { ...state, holder: { ...h0, record, permissionChecked: true, view: "error", error: "A payment may already be confirmed. Try again to recover its receipt before requesting another payment." } };
+              appState = state; appMount.setTree(reRender(state)); return;
+            }
+          }
           if (checkAmount <= 0n) throw new Error("This mandate has no remaining payment budget.");
           const actions = buildHolderAction(record, [checkAmount.toString()], mainnetSession.address);
           await prepareHolderProof(mainnetSession.account, actions);
@@ -700,6 +757,17 @@ function boot() {
           const atomic = validateHolderAmount(amount, record);
           const action = buildHolderAction(record, [atomic], mainnetSession.address);
           const holderProgress = readHolderProgress(record.token);
+          if (!holderProgress.pendingTransaction && !holderProgress.completedTransaction) {
+            saveHolderProgress(record.token, {
+              ...holderProgress,
+              amount: atomic.toString(),
+              intent: {
+                amount: atomic.toString(),
+                usesBefore: String(record.uses || 0),
+                totalSpentBefore: String(record.totalSpent || 0),
+              },
+            });
+          }
           const confirmed = await exerciseHolderPass(mainnetSession.account, action, holderProgress, (pending) => {
             saveHolderProgress(record.token, { ...pending, amount: atomic.toString() });
             state = { ...state, holder: { ...h0, view: "confirming", record, permissionChecked: true, issuance: { ...iss, pendingTransaction: pending.pendingTransaction } } };
@@ -786,9 +854,20 @@ function boot() {
           state = { ...state, plan: null, planError: result.error };
         }
       }
-      appMount.setTree(reRender(state));
       appState = state;
+      appMount.setTree(reRender(state));
     },
+  });
+  const originalSetTree = appMount.setTree.bind(appMount);
+  appMount.setTree = (tree) => {
+    saveUiRecovery(appState);
+    originalSetTree(tree);
+  };
+  const persistCurrentScreen = () => saveUiRecovery(appState);
+  window.addEventListener("pagehide", persistCurrentScreen);
+  window.addEventListener("beforeunload", persistCurrentScreen);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") persistCurrentScreen();
   });
   import("../sdk/mainnet-actions.mjs").then(({ discoverWallets }) => {
     const found = discoverWallets((wallets) => {
@@ -801,7 +880,7 @@ function boot() {
     walletDiscovery = found.store;
     availableWallets = found.wallets;
   }).catch(() => { availableWallets = []; });
-  if (sharedPolicy) preloadHolderPolicy(sharedPolicy, state.networkConfig);
+  if (restoredHolderToken) preloadHolderPolicy(restoredHolderToken, state.networkConfig);
 }
 
 // DOMContentLoaded is the safe entry point — the script is loaded

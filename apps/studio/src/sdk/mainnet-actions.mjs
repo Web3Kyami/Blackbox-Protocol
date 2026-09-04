@@ -1,6 +1,7 @@
 import { RpcProvider, WalletAccountV6, hash, shortString, validateAndParseAddress, walletV6 } from "starknet";
 import { createStore } from "@starknet-io/get-starknet-discovery";
 import { getAllowance } from "./policy-reads.mjs";
+import { makeNetworkProvider } from "./studio-network.mjs";
 
 export const MAINNET_CHAIN_ID = "0x534e5f4d41494e";
 export const MAINNET_RPC = "https://rpc.starknet.lava.build";
@@ -15,6 +16,7 @@ export const MAINNET_CLASSES = Object.freeze({
 });
 
 export const mainnetProvider = new RpcProvider({ nodeUrl: MAINNET_RPC });
+export const mainnetReadProvider = makeNetworkProvider();
 
 const normal = (value) => `0x${BigInt(value).toString(16)}`;
 const hex = (value) => `0x${BigInt(value).toString(16)}`;
@@ -193,13 +195,13 @@ export async function deployNext(account, draft, plan, progress = {}, onProgress
   return next;
 }
 
-export async function currentPoolFee(provider = mainnetProvider) {
+export async function currentPoolFee(provider = mainnetReadProvider) {
   const result = await provider.callContract({ contractAddress: MAINNET_POOL, entrypoint: "get_fee_amount", calldata: [] });
   if (!result?.[0]) throw new Error("The privacy pool did not return its fee.");
   return BigInt(result[0]);
 }
 
-export async function deliveryApprovalStatus(owner, token, provider = mainnetProvider) {
+export async function deliveryApprovalStatus(owner, token, provider = mainnetReadProvider) {
   const [fee, passAllowance, feeAllowance, observedAtBlock] = await Promise.all([
     currentPoolFee(provider),
     getAllowance(provider, token, owner, MAINNET_POOL),
@@ -228,7 +230,7 @@ export function deliveryTransactionFromEvents(events, owner) {
   return matching.length ? matching[matching.length - 1].transaction_hash : null;
 }
 
-export async function findPrivatePassDelivery(owner, token, provider = mainnetProvider) {
+export async function findPrivatePassDelivery(owner, token, provider = mainnetReadProvider) {
   const events = [];
   let continuation = undefined;
   do {
@@ -269,7 +271,7 @@ export async function deliverPrivatePass(account, token, recipient, approvalBloc
   if (progress.pendingDeliveryTransaction) {
     return successful(progress.pendingDeliveryTransaction, "Private pass delivery");
   }
-  const currentBlock = await mainnetProvider.getBlockNumber();
+  const currentBlock = await mainnetReadProvider.getBlockNumber();
   const remaining = Number(approvalBlock) + 10 - currentBlock;
   if (remaining > 0) throw new Error(`Wait ${remaining} more Mainnet block${remaining === 1 ? "" : "s"}, then try again.`);
   const response = await account.strk20InvokeTransaction([
@@ -293,4 +295,49 @@ export async function exerciseHolderPass(account, actions, progress = {}, onProg
   const response = await account.strk20InvokeTransaction(actions);
   onProgress({ pendingTransaction: response.transaction_hash });
   return successful(response.transaction_hash, "Payment request");
+}
+
+export function paymentTransactionFromEvents(events, record, intent) {
+  const treasury = BigInt(record?.treasury || 0);
+  const asset = BigInt(record?.asset || 0);
+  const recipient = BigInt(record?.recipient || 0);
+  const amount = BigInt(intent?.amount || 0);
+  const minimumTotal = BigInt(intent?.totalSpentBefore || 0) + amount;
+  const matches = (events || []).filter((event) => {
+    const keys = event.keys || [];
+    const data = event.data || [];
+    if (keys.length < 4 || data.length < 3) return false;
+    const totalSpent = BigInt(data[1]) + (BigInt(data[2]) << 128n);
+    return BigInt(keys[1]) === treasury
+      && BigInt(keys[2]) === asset
+      && BigInt(keys[3]) === recipient
+      && BigInt(data[0]) === amount
+      && totalSpent >= minimumTotal;
+  });
+  return matches.length ? matches[matches.length - 1].transaction_hash : null;
+}
+
+export async function recoverSubmittedPayment(record, intent, provider = mainnetReadProvider) {
+  if (!record?.adapter || !intent?.amount) return null;
+  if (BigInt(record.uses || 0) <= BigInt(intent.usesBefore || 0)) return null;
+  if (BigInt(record.totalSpent || 0) < BigInt(intent.totalSpentBefore || 0) + BigInt(intent.amount)) return null;
+  const events = [];
+  let continuation = undefined;
+  do {
+    const result = await provider.getEvents({
+      address: record.adapter,
+      keys: [[hash.getSelectorFromName("TreasurySpent")]],
+      from_block: { block_number: STUDIO_MAINNET_FROM_BLOCK },
+      to_block: "latest",
+      continuation_token: continuation,
+      chunk_size: 100,
+    });
+    events.push(...(result.events || []));
+    continuation = result.continuation_token;
+  } while (continuation);
+  const transactionHash = paymentTransactionFromEvents(events, record, intent);
+  if (!transactionHash) return null;
+  const receipt = await provider.getTransactionReceipt(transactionHash);
+  if (!receipt.isSuccess()) return null;
+  return { transactionHash, blockNumber: Number(receipt.block_number || 0) };
 }

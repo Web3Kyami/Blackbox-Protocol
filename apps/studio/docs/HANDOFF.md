@@ -108,3 +108,34 @@ with rendered checks at 320, 390, 768, and 1024 pixels. Do not add an earlier
 media query and assume it wins; extend the final responsive section instead.
 The operator page now says `Request an approved payment` and omits internal
 terminal/link labels and the repeated instructional checklist.
+
+## Sep 4 payment-completion hardening
+
+The final operator path now preserves a successful receipt even if the
+immediate allowance refresh is unavailable. It never renders the pre-payment
+allowance as an updated value: the remaining allowance appears only after a
+fresh post-payment read. In both cases the completed screen keeps the explorer
+link and removes the payment action. Saved completed and pending hashes are
+checked by receipt on reload, without automatic resubmission.
+
+Automated tests and the Studio preview build pass. No Mainnet transaction was
+sent. The future demo transaction is still the only valid way to mark the
+Studio-created holder exercise as Mainnet verified.
+
+## Sep 4 refresh recovery
+
+Studio now checkpoints public workflow context in
+`blackbox.studio.ui.recovery.v1`. An accidental refresh restores the active
+screen, wizard step, public form, plan, and selected mandate. Wallet authority
+is never restored or stored, so the user reconnects and continues from that
+screen.
+
+Before a holder wallet opens, Studio saves the requested amount plus the public
+use count and total spending. If the transaction is broadcast but its callback
+is lost, Studio verifies the advanced counters, matches the adapter's
+`TreasurySpent` event, checks the receipt, and restores completion. If the
+counters changed but receipt recovery fails, another payment remains blocked.
+Read-only recovery uses two public Mainnet RPC endpoints.
+
+Studio verification now passes with 10 test files. No wallet request, Mainnet
+transaction, or STRK spending occurred during this hardening.

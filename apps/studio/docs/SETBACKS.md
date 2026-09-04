@@ -608,3 +608,35 @@ contracts were correct; only the Studio read code had to learn their real shape.
 - **Verification:** rendered checks were completed at 320, 390, 768, and 1024
   pixels. Automated coverage requires the final layer to include every major
   Studio surface and retain all four mobile navigation destinations.
+
+### S-50 — A delayed post-payment read could show a stale allowance
+
+- **Risk:** the payment receipt could already be successful while the immediate
+  policy refresh failed. Keeping the pre-payment record on the success screen
+  would make its old allowance look current.
+- **Fix:** a successful receipt always keeps the payment confirmation screen and
+  removes the payment button. Studio shows the remaining allowance only when a
+  fresh post-payment read succeeds. A temporary read failure never changes a
+  confirmed payment back into an actionable payment form.
+- **Prevention:** holder-view regressions cover both a successful refreshed read
+  and a delayed read. Both states retain the transaction link and suppress the
+  payment button; only the verified read displays the remaining allowance.
+
+### S-51 — Refresh could lose the current screen or a wallet callback
+
+- **Risk:** a refresh before deployment could discard the draft and return to
+  the home screen. A refresh after a wallet broadcast but before its callback
+  could also leave a reusable payment looking available again.
+- **Fix:** checkpoint the current public workflow state on every render and when
+  the page is hidden or unloaded. Restore the same screen and inputs after
+  reload. Save a public payment intent before opening the wallet, then recover
+  a lost callback from the policy counters, matching `TreasurySpent` event, and
+  successful receipt.
+- **Safety:** if Mainnet indicates that the policy changed but Studio cannot
+  recover the receipt, it blocks another payment and asks the user to retry the
+  read. It never guesses that the previous request failed.
+- **Privacy:** wallet sessions, private notes, proofs, and wallet-owned state are
+  excluded from the recovery checkpoint.
+- **Prevention:** new regressions cover workflow restoration, secret exclusion,
+  invalid recovery data, exact event matching, successful receipt recovery, and
+  unchanged policy counters.

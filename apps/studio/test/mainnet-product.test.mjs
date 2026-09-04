@@ -16,6 +16,8 @@ import {
   exerciseHolderPass,
   deliveryApprovalStatus,
   deliveryTransactionFromEvents,
+  paymentTransactionFromEvents,
+  recoverSubmittedPayment,
 } from "../src/sdk/mainnet-actions.mjs";
 import { renderHolder } from "../src/ui/holder.mjs";
 
@@ -142,6 +144,45 @@ test("a successful public deposit identifies an already delivered private pass",
     { keys: ["0xtransfer", owner, "0x040337b1af3c663e86e333bab5a4b28da8d4652a15a69beee2b677776ffe812a"], data: ["0x1", "0x0"], transaction_hash: "0xdelivery" },
   ];
   assert.equal(deliveryTransactionFromEvents(events, owner), "0xdelivery");
+});
+
+test("a lost wallet callback recovers the exact treasury payment from Mainnet", async () => {
+  const record = {
+    adapter: "0xa",
+    treasury: "0x1",
+    asset: "0x2",
+    recipient: "0x3",
+    uses: 1,
+    totalSpent: "15",
+  };
+  const intent = { amount: "5", usesBefore: "0", totalSpentBefore: "10" };
+  const events = [
+    { keys: ["0xevent", "0x1", "0x2", "0x4"], data: ["0x5", "0xf", "0x0"], transaction_hash: "0xwrong-recipient" },
+    { keys: ["0xevent", "0x1", "0x2", "0x3"], data: ["0x4", "0xe", "0x0"], transaction_hash: "0xwrong-amount" },
+    { keys: ["0xevent", "0x1", "0x2", "0x3"], data: ["0x5", "0xf", "0x0"], transaction_hash: "0xpayment" },
+  ];
+  assert.equal(paymentTransactionFromEvents(events, record, intent), "0xpayment");
+
+  const provider = {
+    getEvents: async () => ({ events, continuation_token: null }),
+    getTransactionReceipt: async (hash) => ({ isSuccess: () => hash === "0xpayment", block_number: 91 }),
+  };
+  assert.deepEqual(await recoverSubmittedPayment(record, intent, provider), {
+    transactionHash: "0xpayment",
+    blockNumber: 91,
+  });
+});
+
+test("payment recovery does not claim completion when policy counters did not advance", async () => {
+  let eventReads = 0;
+  const provider = {
+    getEvents: async () => { eventReads += 1; return { events: [], continuation_token: null }; },
+  };
+  const recovered = await recoverSubmittedPayment({
+    adapter: "0xa", treasury: "0x1", asset: "0x2", recipient: "0x3", uses: 4, totalSpent: "20",
+  }, { amount: "5", usesBefore: "4", totalSpentBefore: "20" }, provider);
+  assert.equal(recovered, null);
+  assert.equal(eventReads, 0);
 });
 
 test("operator policy details stay hidden before wallet proof", () => {

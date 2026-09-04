@@ -424,7 +424,7 @@ function renderDeploymentReview(state) {
         disabled: !state.wallet?.address || !state.plan || complete || state.mainnet?.pending ? "disabled" : null,
         onclick: { type: "mainnet-deploy-next" },
         "data-testid": "mainnet-deploy-next",
-      }, text(state.mainnet?.pending === "confirming" ? "Confirming onchain" : state.mainnet?.pending ? "Waiting for wallet" : stage)),
+      }, text(state.mainnet?.pending === "confirming" ? "Confirming transaction" : state.mainnet?.pending ? "Approve in wallet" : stage)),
       state.mainnet?.error ? h("p", { class: "hb-error" }, text(state.mainnet.error)) : null,
       state.mainnet?.lastTransaction ? h("p", { class: "field-help studio-mono" }, text(`Confirmed: ${state.mainnet.lastTransaction}`)) : null,
     ),

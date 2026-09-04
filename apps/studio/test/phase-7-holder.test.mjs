@@ -94,9 +94,25 @@ test("renderHolder shows the token input when no record is loaded", () => {
   });
   const completeHtml = JSON.stringify(complete);
   assert.match(completeHtml, /PAYMENT CONFIRMED/);
+  assert.match(completeHtml, /confirmed on Mainnet/);
   assert.match(completeHtml, /Remaining treasury allowance/);
   assert.match(completeHtml, /https:\/\/voyager\.online\/tx\/0x123/);
   assert.doesNotMatch(completeHtml, /Request payment/);
+
+  const delayedRead = renderHolder({
+    view: "holder",
+    holder: {
+      token: BBP,
+      record: fakeRecord({ postPaymentStateVerified: false }),
+      view: "complete", permissionChecked: true,
+      issuance: { fields: { amount: "1" }, receipt: { kind: "real", txHash: "0x456" } },
+    },
+  });
+  const delayedReadHtml = JSON.stringify(delayedRead);
+  assert.match(delayedReadHtml, /PAYMENT CONFIRMED/);
+  assert.match(delayedReadHtml, /https:\/\/voyager\.online\/tx\/0x456/);
+  assert.doesNotMatch(delayedReadHtml, /Remaining treasury allowance/);
+  assert.doesNotMatch(delayedReadHtml, /Request payment/);
 });
 
 test("renderHolder only claims public policy states", () => {

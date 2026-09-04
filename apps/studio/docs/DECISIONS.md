@@ -1207,3 +1207,26 @@ accidental duplicate treasury payment.
 
 **Source:** `src/sdk/mainnet-actions.mjs`, `src/ui/app.mjs`,
 `src/ui/holder.mjs`, `test/mainnet-product.test.mjs`.
+
+## S057 — Refresh recovery stores public workflow context only (2026-09-04)
+
+**Status:** active.
+
+**Decision:** Studio checkpoints the current page, wizard step, public draft,
+review plan, selected mandate, and public holder-policy identifier. It never
+stores wallet authority, a private note, proof material, or wallet-owned state.
+Pending transaction hashes remain in their existing action-specific recovery
+records.
+
+If a holder payment is broadcast but the wallet callback is lost during a page
+refresh, Studio compares the saved public intent with the updated policy
+counters and recovers the matching `TreasurySpent` event and successful receipt.
+If the counters changed but the receipt cannot be recovered, Studio blocks a
+new request instead of risking a duplicate payment.
+
+**Reason:** refreshing must preserve the user's place without turning browser
+storage into the source of truth or weakening the wallet privacy boundary.
+
+**Source:** `src/ui/recovery.mjs`, `src/ui/app.mjs`,
+`src/sdk/mainnet-actions.mjs`, `test/ui-recovery.test.mjs`,
+`test/mainnet-product.test.mjs`.

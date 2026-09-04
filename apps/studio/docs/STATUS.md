@@ -1,6 +1,6 @@
 # BlackBox Studio status
 
-**Last updated:** 2026-09-02, completion and recovery audit
+**Last updated:** 2026-09-04, final payment-state hardening
 
 ## Current product
 
@@ -172,3 +172,43 @@ now a readable single-column composition, mobile navigation keeps all four
 destinations, and financial controls meet a 44-pixel minimum touch target.
 The holder screen no longer exposes internal `Operator link` or `Operator
 terminal` labels and no longer repeats a four-step guide before its action.
+
+## Final payment-state hardening (2026-09-04)
+
+- A successful wallet transaction is shown as confirmed only after its receipt
+  succeeds.
+- The confirmed transaction hash is saved before the follow-up policy refresh.
+  Refreshing the page verifies that hash and cannot silently submit another
+  payment.
+- The completed screen has no payment button and always links to the confirmed
+  transaction.
+- A temporary failure while reading the updated policy no longer returns the
+  operator to the payment form. Studio keeps the confirmed screen and hides the
+  allowance until a fresh onchain read verifies its current value.
+- Regression coverage passes for successful completion, delayed policy reads,
+  receipt recovery, rejected pending transactions, successive allowance
+  reductions, and duplicate-submission prevention.
+
+No Mainnet transaction was requested, signed, or broadcast during this work.
+The Studio-created holder exercise remains `UNVERIFIED` until the planned video
+transaction is actually confirmed.
+
+## Refresh and wallet-delay hardening (2026-09-04)
+
+- Refresh restores the current Studio screen, wizard step, public inputs,
+  review plan, and selected mandate instead of returning to the beginning.
+- The operator address entered during pass delivery is saved immediately.
+- Wallet authority is deliberately not persisted. After a refresh, the user
+  reconnects the wallet but continues from the restored screen.
+- Payment intent is saved before the wallet opens. If the wallet broadcasts and
+  the page loses its callback, Studio recovers the exact treasury event and
+  successful receipt from Mainnet.
+- If policy counters changed and receipt recovery is temporarily unavailable,
+  Studio blocks another request. It does not risk a duplicate reusable payment.
+- Read-only fee, allowance, block, delivery, and payment-recovery checks use the
+  configured Mainnet RPC with a public fallback.
+- Slow network and wallet errors now use short, actionable messages. Technical
+  provider payloads are not shown in the primary flow.
+
+Studio verification passes with 10 test files. The self-contained preview build
+passes. No Mainnet transaction or wallet request occurred.
