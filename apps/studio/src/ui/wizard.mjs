@@ -1,31 +1,5 @@
-// =============================================================================
-// Studio wizard — pure render layer
-// =============================================================================
-//
-// This module defines the Studio configuration wizard as a **pure** function:
-//   renderWizard(state) -> NodeTree
-// where NodeTree is a plain object {tag, attrs, children}. No DOM, no
-// browser globals, no DOM objects. The browser mounts the tree in
-// `mount.mjs`; the test layer asserts the tree shape directly.
-//
-// Why pure? Two reasons:
-//   1. The Phase 1 smoke test runs in Node, which has no DOM. Pure
-//      functions are trivially testable without jsdom, a build step,
-//      or a runtime dep.
-//   2. Pure render keeps the wizard a function of state. The browser
-//      becomes a thin adapter; the logic is portable.
-//
-// "Skeleton" in this file means: the wizard has all the steps, the
-// stepper, the review rail, and a real call to the Studio SDK to
-// predict deployment addresses. It does NOT have a wallet
-// connection, a real chain call, a real submit, or any persistence.
-// State stays in memory; refreshing the page resets to defaults.
-//
-// Wizard content references docs/USER_FLOW.md (steps 1-6) and
-// docs/UI_DIRECTION.md (visual tokens, layout pattern). Every step
-// has a plain-language explanation, per UI_DIRECTION.md §"Form
-// controls" and a11y requirements.
-// =============================================================================
+// Pure render model for the Studio mandate wizard. The browser mounts this
+// tree in mount.mjs, while tests can inspect it without a DOM dependency.
 
 // Default draft state. Used both as the initial state in the browser
 // and as a "blank" for tests. All string fields are empty; numerics
@@ -434,15 +408,7 @@ function renderDeploymentReview(state) {
 // Right rail: live-updated summary + (on the review step) the real
 // predicted deployment plan from the SDK.
 //
-// Phase 3 — the rail renders the REAL UNSIGNED_PLAN shape the SDK
-// returns: declarations with class hashes, deployments with their
-// constructor args (including $gatekeeper symbolic refs), setup
-// calls with signer role + entrypoint + calldata, and the
-// requiresOwnerApproval banner. The rail also exposes a copy-able
-// "Public configuration" JSON and an "SDK calldata" code export
-// (see publicConfiguration / calldataExport). Both are rendered as
-// <pre> blocks so the user can read them; the browser layer
-// (app.mjs) wires a "copy" button to navigator.clipboard.
+// The review rail renders the unsigned SDK plan and public configuration.
 function renderReviewRail(state) {
   const summary = summaryFor(state.draft);
   const onReview = STEPS[state.step].id === "deployment-review";
@@ -630,18 +596,14 @@ export function renderWizard(state) {
 // State update (also pure)
 // =============================================================================
 //
-// This is a tiny reducer. In a real app, this would live in its own
-// module. For Phase 1, it's here because the wizard is a single
-// concern. The reducer is also pure: same (state, event) -> same state.
+// The reducer is pure: the same state and event produce the same result.
 //
 // Events are described in the tree as {type, ...}. Special: when a
 // form field has `oninput: set({treasury: "@"})`, the "@" means
 // "use the input element's value at event time". In the browser,
 // `mount.mjs` substitutes the real value before dispatching.
 
-// Phase 3 — declared class hashes from REUSE_MAP.md. These are the
-// public class hashes the SDK builds plans against. Surfaced on the
-// Review rail so the user can see what they are about to declare.
+// Public class hashes used by the SDK deployment plan.
 const DECLARED_CLASS_HASHES = Object.freeze({
   CapabilityGatekeeper:
     "0x62b8b737e10c4b06727e9ef672fc0163f8331388e812a249f28cc9edaa63efe",
@@ -651,7 +613,7 @@ const DECLARED_CLASS_HASHES = Object.freeze({
     "0x7617280a31c7ffbf16b5eb18e7f783d1953d295277b293eb816b304041a3da0",
 });
 
-// Phase 3 — deterministic capability-name derivation. Studio names
+// Deterministic capability-name derivation. Studio names
 // are stable across re-renders for the same draft and never leak
 // user data into the onchain name (the onchain name is public).
 function deriveCapabilityName(draft) {
@@ -660,7 +622,7 @@ function deriveCapabilityName(draft) {
   return `BBXS-${stamp}-${cap}`;
 }
 
-// Phase 3 — convert a decimal "1.5" string into atomic STRK units
+// Convert a decimal "1.5" string into atomic STRK units
 // (1 STRK = 1e18 wei). Returns a BigInt. Throws on invalid input.
 // We deliberately do not support fractional wei: STRK is 18 decimals
 // and we keep math in BigInt to avoid silent precision loss.
@@ -681,7 +643,7 @@ function toAtomicStrk(decimal) {
   return BigInt(wholeClean) * 10n ** 18n + BigInt(padded || "0");
 }
 
-// Phase 3 — convert "YYYY-MM-DD" or unix-seconds string to a
+// Convert a YYYY-MM-DD or unix-seconds string to a
 // BigInt unix-seconds value. Empty/undefined → 0 (which the SDK
 // rejects; we surface that as a planError before calling the SDK).
 function toUnixExpiry(value) {
@@ -705,7 +667,7 @@ function toUnixExpiry(value) {
   );
 }
 
-// Phase 3 — build a minimal-valid SDK input from the wizard draft.
+// Build the SDK input from the wizard draft.
 // Returns { ok: true, input } | { ok: false, error: <first missing/invalid field> }.
 // Field-level errors are surfaced to the user as planError so the
 // right rail shows exactly which Treasury Mandate input is wrong.
@@ -824,7 +786,7 @@ export function computePlan(draft, sdk, networkConfig = {}) {
       supply: built.input.supply.toString(),
       treasuryAllowance: built.input.treasuryAllowance.toString(),
     });
-    // Phase 3 — the rail consumes the real UNSIGNED_PLAN shape:
+    // The rail consumes the unsigned plan returned by the SDK:
     //   { status, network, declarations, deployments, setupCalls, ... }
     // plus the SDK banner "requiresOwnerApproval: true". We return
     // the plan as-is and let renderReviewRail render the relevant
@@ -835,7 +797,7 @@ export function computePlan(draft, sdk, networkConfig = {}) {
   }
 }
 
-// Phase 3 — public configuration export. Returns a JSON-serializable
+// Public configuration export. Returns a JSON-serializable
 // object that contains EVERY public input the SDK plan was built
 // from, plus the class hashes, but NO secrets, NO signer material,
 // NO private keys, NO note plaintext. The Studio secret-scan test
@@ -865,14 +827,14 @@ export function publicConfiguration(draft, plan, networkConfig = {}) {
   });
 }
 
-// Phase 3 — SDK calldata export. Renders the plan's deployments
+// SDK calldata export. Renders the plan's deployments
 // and setupCalls as a copy-pasteable JavaScript snippet. The snippet
 // is a sequence of logging lines showing the literal
 // contract address, entrypoint, and calldata array each call would
-// send. It is NOT executable on its own — there is no signer, no
+// send. It is not executable on its own because it has no signer,
 // RPC, no broadcast. It is "executable data" in the
-// IMPLEMENTATION_PLAN.md sense: a developer can paste this into a
-// deploy script, replace `$gatekeeper` with the real deployed
+// broadcast step, or RPC client. A developer can adapt it in a deploy
+// script, replace `$gatekeeper` with the real deployed
 // address once known, and feed the calldata to a wallet adapter.
 export function calldataExport(plan) {
   if (!plan) return null;
@@ -950,7 +912,7 @@ export function reduce(state, event) {
       // Starknet enable() call — no transaction and no Mainnet write.
       // It dispatches this event with { address, chainId } once the user approves.
       // Invalidate any stale plan so app.mjs recomputes on the Review step
-      // with the newly-prefilled treasury address (Phase 2.3 wiring).
+      // with the newly prefilled treasury address.
       return {
         ...state,
         wallet: event.address
@@ -964,19 +926,10 @@ export function reduce(state, event) {
     case "disconnect-wallet":
       return { ...state, wallet: null };
     case "submit-skeleton":
-      // Phase 2: requires a connected wallet before the browser
-      // proceeds to sign/submit. The wizard itself is pure — it just
-      // records the request. The browser layer gates the actual
-      // wallet interaction (see app.mjs dispatch). With no wallet
-      // connected here, this is still effectively a no-op that leaves
-      // state unchanged.
+      // The browser layer handles wallet submission.
       return state;
     case "copy-export":
-      // Phase 3 — the wizard is pure, so the reducer is a no-op for
-      // copy events. The browser layer (app.mjs) intercepts this
-      // event and writes the relevant export text to the
-      // clipboard. The wizard just records that the request happened
-      // — nothing else to do.
+      // The browser layer handles clipboard writes.
       return state;
     default:
       return state;

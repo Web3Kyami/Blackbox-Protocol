@@ -1,5 +1,5 @@
 // =============================================================================
-// Studio holder experience view — Phase 7 (Dynamic holder experience)
+// Studio holder experience view.
 // =============================================================================
 //
 // Pure render (no side effects). Produces the NodeTree for the holder view:
@@ -9,8 +9,8 @@
 //     completion) derived from classifyPolicy()
 //   - an exercise panel for the policy-defined payment.
 //
-// All data comes from the normalized record (Phase 5/7 shape). No addresses
-// are hardcoded. The view never calls the chain — actions go through the
+// All data comes from the normalized policy record. No addresses are
+// hardcoded. The view never calls the chain. Actions go through the
 // app handler -> holder-action.mjs -> the connected privacy wallet.
 // =============================================================================
 

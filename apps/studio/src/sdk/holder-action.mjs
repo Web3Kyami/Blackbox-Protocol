@@ -1,5 +1,5 @@
 // =============================================================================
-// Studio holder action — Phase 7 (execute only the policy-defined action)
+// Executes only the action defined by the selected policy.
 // =============================================================================
 //
 // The privacy-enabled wallet owns note selection, proof generation, and
@@ -12,7 +12,7 @@ import { buildWalletApiCapabilityActions } from "./blackbox-capability-sdk.mjs";
 // upstream SDK verbatim so the calldata matches what a real STRK20 wallet
 // adapter would execute against Gatekeeper.privacy_invoke.
 //
-// record: a dashboard record (Phase 5/7 shape) — must carry the policy fields
+// record: a dashboard record that must carry the policy fields
 //         (gatekeeper, capabilityToken, target, selector, enforceFirstArgMax,
 //          maxFirstArg, reusable, active) plus asset.
 // targetCalldata: the amount/args the holder exercises (e.g. ["0x1"] for a

@@ -1,15 +1,12 @@
 {
-  "name": "@blackbox-arena/devnet-session",
+  "name": "@blackbox/devnet-session",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "BlackBox Protocol Devnet integration and legacy Arena verification suite",
+  "description": "BlackBox Protocol STRK20 integration test harness",
   "scripts": {
     "typecheck": "node ../../_research/starknet-privacy/e2e/node_modules/typescript/bin/tsc --noEmit",
-    "test": "vitest run test/",
-    "test:stage-a": "vitest run test/stage-a-session.test.ts",
-    "test:stage-b": "vitest run test/stage-b-dashboard.test.ts",
-    "test:e2e": "vitest run test/blackbox-arena.test.ts",
+    "test": "node scripts/run-capability-e2e.mjs",
     "test:capability": "node scripts/run-capability-e2e.mjs"
   },
   "dependencies": {

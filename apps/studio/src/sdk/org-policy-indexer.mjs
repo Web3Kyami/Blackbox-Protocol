@@ -4,8 +4,7 @@
 //
 // The dashboard must show ONLY policies the connected organization wallet
 // controls (i.e. it is the `issuer` recorded in the Gatekeeper). Studio never
-// shows sample data as connected-wallet data (IMPLEMENTATION_PLAN.md Phase 5
-// gate).
+// shows sample data as connected-wallet data.
 //
 // Discovery strategy (read-only, RPC-based):
 //   1. Scan Mainnet UDC deployment events for CapabilityToken contracts
@@ -134,8 +133,7 @@ export function toDashboardRecord(row, { discoveredAtBlock, registerTx } = {}) {
       adapter: explorerAddress(row.adapter),
       registerTx: registerTx ? explorerTx(registerTx) : null,
     },
-    // Entry points the dashboard surfaces (Phase 5 only renders buttons;
-    // Phase 6/7 wire the actual actions).
+    // Entry points surfaced by the mandate dashboard.
     actions: {
       export: true,
       issue: state === "active",

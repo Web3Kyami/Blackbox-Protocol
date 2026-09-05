@@ -4,7 +4,7 @@
 //   ../src/sdk/blackbox-capability-sdk.mjs
 // is a faithful copy of the upstream file at
 //   ../../packages/capability-sdk/src/index.mjs
-// that was snapshotted on 2026-08-28.
+// used by Studio.
 //
 // Important boundary note
 // -----------------------

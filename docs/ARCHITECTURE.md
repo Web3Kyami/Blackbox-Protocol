@@ -1,157 +1,57 @@
 # Architecture
 
-> **Prototype architecture:** This file describes the current deployed/tested
-> Arena prototype. [`VNEXT_PROTOCOL.md`](./VNEXT_PROTOCOL.md) defines the
-> replacement protocol architecture. In particular, live transferable wallet
-> balances and mutable winner recomputation are not accepted vNext authority.
-
-The current BlackBox Protocol path is:
+BlackBox has three onchain components and two client surfaces.
 
 ```text
-issuer -> CapabilityToken pass -> STRK20 private note
-holder -> same-tx pass delivery + privacy_invoke -> CapabilityGatekeeper
-CapabilityGatekeeper -> exact public policy checks -> protected target
-                     -> burn one-shot pass OR return reusable private note
+Treasury
+  ├─ defines a public policy in CapabilityGatekeeper
+  ├─ approves a fixed budget to TreasurySpendAdapter
+  └─ deposits CapabilityToken passes into STRK20
+
+Operator wallet
+  └─ spends one private pass through STRK20
+       └─ CapabilityGatekeeper validates the action
+            └─ TreasurySpendAdapter pays the fixed recipient
 ```
 
-The holder-facing static app follows the official Wallet API route: it detects
-wallet-standard providers, connects `WalletAccountV6`, builds the exact STRK20
-action array from the public policy, asks the wallet to prepare/simulate, and
-then verifies sender separation after execution. It never receives viewing keys,
-proofs, note plaintext, or private keys. Browser-wallet and mainnet execution
-remain `UNVERIFIED` until a real deployed policy is exercised.
+## CapabilityToken
 
-The production-oriented reference target is `TreasurySpendAdapter`: its
-constructor fixes the Gatekeeper, treasury, ERC-20, and recipient, and its only
-action is `spend(amount)`. This makes the Gatekeeper's public first-argument cap
-meaningful. `MockCapabilityTarget` is test scaffolding only.
+Each base unit represents one bearer pass. The token is permanently connected
+to its issuer, STRK20 pool, and Gatekeeper.
 
-Its real local STRK20 flow is verified in
-`packages/devnet-session/test/capability-protocol.test.ts`. Everything below is
-retained as legacy Arena architecture and regression evidence.
+When the pool transfers a pass to the Gatekeeper, the token records the current
+transaction hash and delivered amount. The Gatekeeper consumes that marker in
+the same transaction. A pass sent earlier cannot be reused as authorization.
 
-## State machine
+## CapabilityGatekeeper
 
-```text
-REGISTRATION --start time--> LIVE --end/authorized close--> CLOSED --capped payout--> SETTLED
-     |                         |
- register commitments         accept/reject receipts
-```
+The Gatekeeper accepts `privacy_invoke` only from its configured pool. A policy
+binds one capability token to:
 
-Registration at or after the start is rejected. Actions before the start, after the end, or after explicit close are rejected. Close is permissionless after end (any account, not sponsor-only — f3), same for settle. Settlement is single-use and capped at `min(deposited, prize_cap)`. Escrow refunds are permissionless post-close.
+- target contract;
+- target selector;
+- optional maximum first argument;
+- expiry;
+- one-shot or reusable behavior;
+- active or revoked status.
 
-## Authority model
+The Gatekeeper checks the fresh pass delivery before forwarding the call. A
+one-shot pass is burned. A reusable pass is returned to the pool as a new note.
 
-- Sponsor: creates fixed rules, sets `price` + `float_token` before start only, deposits prize; cannot edit post-start. `add_allowed_asset/target` locked at start (rules freeze).
-- Strategy operator: registers one opaque commitment (version hash); `registrant` stored and emitted; reported amounts never drive the Option B scorer.
-- Arena adapter: bound at setup (`set_action_adapter` once, locked); only it may call the private `open_submit_action*` path. Public lifecycle calls are permissionless.
-- Float token: ERC-20 whose `balance_of(registrant)` is the value axis when set — contract-owned measurement, not self-report.
-- Web/dashboard: read-only projection via `starknetCall`; it cannot select or reorder the winner — winner is `get_winner()` on-chain.
-- LLM: no scoring authority.
+## TreasurySpendAdapter
 
-## Rules and commitment
+The adapter fixes the Gatekeeper, treasury, ERC-20 asset, and recipient in its
+constructor. Its only holder-controlled input is `spend(amount)`.
 
-SHA-256 over recursively key-sorted JSON (`packages/core/src/arena.mjs::commitRules()`), truncated to 31 bytes (felt252), stored as `rules_commitment`. Both off-chain manifest and on-chain read must agree (`BigInt` compare in `open-round-crosscheck`). Mixing algorithms is forbidden. Visible in dashboard as canonical JSON for local `sha256` recompute.
+The treasury gives the adapter a normal ERC-20 allowance. That allowance is the
+total remaining payment budget. It falls after every successful payment, so the
+adapter cannot pay beyond the amount the treasury approved.
 
-## Registration model
+## Clients
 
-Each commitment = `poseidon`? No — label→commitment map is `sha256(canonicalJson)` truncated to 240 bits (see evidence `derived_by`). Commitment is identifier, not ZK proof of code. Registration order stored for tie-break; registrant binding verified per strategy via `get_registrant(commitment)`.
+BlackBox Studio handles configuration, deployment, pass delivery, public policy
+discovery, and recovery from pending transactions. The holder flow prepares and
+submits the STRK20 action through a compatible wallet.
 
-## Action receipts (two eras)
-
-- **Legacy / escrow era (`v4–v5`):** `open_submit_action*` receipts carry `allocation_units × price` pulled via `transfer_from` into adapter per-pool custody (`get_custody(pool, receipt)`), plus `portfolio_value_before/after` (self-reported, D012). Scoring still used those values before Option B.
-- **Option B era:** receipts remain for evidence/custody, but **scorer ignores `portfolio_value_after`** when `float_token` is set — it uses `balance_of` + checkpoints. The spoof demo (Tortoise inflated `5000`) proves the branch switch.
-
-## Value axis — Option B attested float (RECOMMENDED, shipped B1)
-
-**Why:** scorer cannot trust self-reported `current_value`; Starknet can't read historical wallet balances, but it can read live token balances at known times.
-
-```text
-set_float_token(token) [sponsor-only, before start, before any registration, once]
-    -> stored float_token
-
-register_strategy(commitment):
-    -> balance_before = token.balance_of(registrant)  (if float != 0)
-    -> store attest_start[commit], attest_peak[commit]=start, maxDD=0
-    -> each commitment isolated
-
-checkpoint(commitment):  # permissionless, any time while !closed && float set && registered
-    -> cur = token.balance_of(registrant)  [high != 0 saturates to 2^128-1]
-    -> peak = max(existing_peak, cur)
-    -> cur_dd = peak > cur ? (peak - cur)*10000/peak : 0  (u256, saturating)
-    -> max_dd = max(existing, cur_dd)
-    -> index = counts[commit]++; key = poseidon([commitment, index]); store Checkpoint{balance:cur, ts:block_timestamp}
-    -> emit CheckpointRecorded
-
-get_score(commitment):
-    if float==0 or attest_start==0:  # legacy path
-        if start==0 => score -10000 (ineligible); else legacy return/drawdown
-    else:
-        cur = token.balance_of(registrant)  # live final, no arg
-        peak = max(attest_start, attest_peak, cur)
-        cur_dd = peak>cur ? (peak-cur)*10000/peak : 0
-        max_dd = max(attest_max_dd, cur_dd)
-        return_bps = clamped_return_bps(cur, start)  # trunc((cur-start)*10000/start), saturates i64
-        eligible = max_dd <= 3500 bps && ...  # cap param
-        score = eligible ? return_bps - max_dd : -10000 (or ineligible sentinel)
-```
-
-Custody (`open_submit_action_escrowed` / `ARENA_ADAPTER` `withdraw`) still enforces allocation bonds but no longer drives `get_winner`. Checkpoints are poseidon-hashed by `commitment+index` so partial replay must recompute hashes. Drawdown view is `effective_peak = max(start, peak_stored, current)`.
-
-**Honest holes:** single float token (multi-token/LP wealth invisible), checkpoint liveness depends on someone calling `checkpoint()` (permissionless crank; mitigated by contest rule “≥N checkpoints or settle ineligible”), unexplained external inflows are forfeit.
-
-Compare A/B/C in `docs/VALUE-AXIS-OPTIONS.md`. Decision: Option B — the only scorer that measures the result itself on-chain.
-
-## Validation, scoring, drawdown
-
-Legacy validation order (kept for receipt acceptance): shape, registration, time window, duplicate receipt, asset/target allowlist, current-value consistency, drawdown bounds, allocation cap `maxAllocationBps=3500`. Scoring when attested:
-
-```
-return_bps = trunc((final - start) * 10000 / start)   # final = live balance_of, start = attest_start
-max_dd = max(attest_max_dd_stored, checkpoint drawdowns, current drawdown)
-eligible = max_dd <= 3500  (+ allocation checks at action time)
-score = eligible ? return_bps - max_dd : -10000
-```
-
-Sort: eligible desc, score desc, max_dd asc, registration order asc. Saturating `u256 -> i128 -> i64` prevents panic on huge values (201-level fix).
-
-## Public RPC mode (Vercel, judge-demo, mainnet-ready)
-
-Dashboard no longer hardwired to `127.0.0.1:4174`.
-
-```text
-resolvePublicRpcConfig() ->
-  query ?network/?rpcUrl/?arena + localStorage bb:rpcUrl/bb:arenaAddress  (B1 demo defaults when ?network=sepolia or ?public=1)
-  -> { rpcUrl, arenaAddress, adapterAddress, isPublic }
-        |
-        +--> starknetCall(rpcUrl, arena, selector, calldata)  # direct RpcProvider.call (starknet.js)
-        +--> refreshPublicState() -> get_float_token, get_attest_*, get_checkpoint*, get_score (signed PRIME decode), get_winner, get_settlement, rules_commitment
-        +--> renderPublicStatusHtml (topbar Sepolia·Public, block number, attest panel, leaderboard LEADER even when negative)
-        +--> wallet self-register dual path (devnet vs public rpc + verifyRegistrantBinding on correct rpc)
-
-Default Sepolia: https://starknet-sepolia-rpc.publicnode.com  (no Alchemy key, secret scan PASS)
-Mainnet hint:    https://starknet-mainnet-rpc.publicnode.com
-Offline fallback: devnet session fetch fails -> try public RPC before showing offline, with hint link ?network=sepolia&arena=0x52d...&rpcUrl=publicnode
-Form injected by setupPublicRpcControls() in #disconnected-banner: Save/Clear/Load B1 Demo -> localStorage
-```
-
-Static `dist/web` is `vercel --prod` of vanilla JS; no `VERCEL_ENV`, no secrets. Judges on any network can verify B1 via `curl` + `starknetCall`.
-
-## Adapter & custody (per-pool, f3 permissionless)
-
-`ArenaAdapterV2` (class `0x418dbc...00bc`): `set_action_adapter` once, `open_submit_action*` pulls `allocation_units × price` via `transfer_from` into `custody: Map<(pool=caller+whitelisted_target, receipt), raw>`. `withdraw(pool, receipt)` only by pool registrant, post-settle, once per receipt; custody zeroed before transfer (CEI). Events `ActionEscrowed {raw, units}` / `EscrowRefunded {raw}`. Permissionless `close()` / `settle()` (any caller) + `refund_escrow()` on arena side enforce liveness without sponsor.
-
-## Trust assumptions
-
-- Fixture valuations are deterministic demo inputs (Case Study) — not oracle prices.
-- Sponsor fixes rules before commitment; cannot edit post-start. `set_float_token` / `set_price` / `add_allowed_*` all REVERT after start.
-- Option B attested values are contract-observed but single-token; off-float wealth is trust hole disclosed in README.
-- Settlement pays `min(deposited, prize_cap)` to `get_registrant(winner)`; escrow drained to 0; token mechanics are contract-owned (P4.3+).
-- The legacy Arena adapter's privacy path has different assumptions. The vNext
-  capability flow is locally verified against the pinned STRK20 pool, prover,
-  and discovery stack; public-network and mainnet behavior remain `UNVERIFIED`.
-- Web is read-only; never fabricates scores (renders “Score unavailable — contract read failed” on RPC failure).
-
-## Cairo authority now (not UNCOMPILED)
-
-Cairo mirror **is** production authority: `contracts/src/arena.cairo` 998 lines, class `0x7ca7cd…10e360`, builds with Scarb 2.17.0, 67 Cairo tests (53 P1 + 14 B) compile-verified (snforge dlopen pending VPS). Legacy “UNCOMPILED” note is retired for Option B.
+The browser never receives a private key, viewing key, private note, or proof.
+Wallet software owns private note discovery and proving.

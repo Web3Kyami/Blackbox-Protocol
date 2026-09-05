@@ -1,11 +1,10 @@
 // =============================================================================
-// Studio holder read layer — Phase 7 (Dynamic holder experience)
+// Studio holder read layer.
 // =============================================================================
 //
 // Read-only. Loads a public Capability Token policy from its on-chain
 // address (the form the shared holder link carries) and normalizes it into
-// the SAME dashboard record shape used by Phase 5/6, so the holder view and
-// the issuer dashboard share one record contract.
+// the dashboard record shape so the holder and issuer views share one record.
 //
 // No policy/issuer/holder/token/adapter address is hardcoded — the holder
 // link supplies token + gatekeeper + adapter (or they are read from the

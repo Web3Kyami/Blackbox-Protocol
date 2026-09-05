@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Issue a pass | BlackBox</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./index.html"><span class="brand-mark"></span><span>BLACKBOX</span></a>
+    <nav><a href="./use-cases.html">Use cases</a><a href="./docs.html">Docs</a><a href="./security.html">Security</a></nav>
+    <a class="button button-small button-outline" href="./app.html">Open app</a>
+  </header>
+  <main class="app-shell shell">
+    <section class="app-intro">
+      <div>
+        <div class="page-kicker">ISSUE A PRIVATE PASS</div>
+        <h1>Give one person<br><em>one bounded job.</em></h1>
+        <p>This live Mainnet policy gives one wallet a reusable pass to trigger a fixed payment. You review every wallet confirmation before anything is sent.</p>
+      </div>
+      <div class="wallet-card">
+        <small>ISSUER WALLET</small>
+        <strong id="issuer-address">Not connected</strong>
+        <button id="issuer-connect" class="button button-primary">Connect issuer wallet</button>
+        <div class="connection-facts">
+          <div><span>NETWORK</span><strong id="issuer-network">Unchecked</strong></div>
+          <div><span>ROLE</span><strong id="issuer-role">Awaiting wallet</strong></div>
+          <div><span>PRIVATE ACTIONS</span><strong id="issuer-api">Unchecked</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="capability-dashboard issue-dashboard">
+      <div class="dashboard-heading"><div><small>LIVE MAINNET POLICY</small><h2>Issue one reusable payment pass</h2></div><span>0.01 STRK / USE</span></div>
+      <div class="issue-layout">
+        <section class="issue-card">
+          <span class="issue-step">01</span>
+          <h3>Choose the pass recipient</h3>
+          <p>This is the wallet that will receive the private pass. The address is used only by your wallet to deliver the note.</p>
+          <label class="operator-label" for="pass-recipient">Recipient wallet</label>
+          <input id="pass-recipient" spellcheck="false" autocomplete="off">
+          <dl class="issue-facts">
+            <div><dt>Pass</dt><dd>1 reusable pass</dd></div>
+            <div><dt>Can do</dt><dd>Pay 0.01 STRK</dd></div>
+            <div><dt>Can pay</dt><dd>Policy-defined recipient</dd></div>
+            <div><dt>Expires</dt><dd id="pass-expiry">Loading…</dd></div>
+          </dl>
+        </section>
+        <section class="issue-card issue-actions">
+          <span class="issue-step">02</span>
+          <h3>Confirm two clear steps</h3>
+          <p>First, allow STRK20 to move exactly one BlackBox pass and the pool's current public STRK fee. Then your wallet creates the private delivery and asks you for one final transaction confirmation.</p>
+          <button id="approve-pass" class="button button-secondary button-wide" disabled>1. Approve pass + pool fee</button>
+          <button id="issue-pass" class="button button-primary button-wide" disabled>2. Send private pass</button>
+          <div class="execution-state"><span id="issue-status-dot" data-state="idle"></span><div><small id="issue-status">CONNECT ISSUER WALLET</small><span id="issue-message">No wallet request has been created.</span></div></div>
+          <div id="issue-result" class="operator-result" hidden></div>
+        </section>
+      </div>
+    </section>
+    <section class="app-boundary"><strong>What you are approving</strong><p>The pass deposit address, token, amount, and pool fee are public. The wallet receiving the resulting pass is handled as a private STRK20 note. This pass is a bearer permission: it can only trigger the fixed payment rule; it cannot withdraw your wallet balance or change the recipient.</p></section>
+  </main>
+  <script type="module" src="./issue.mjs"></script>
+</body>
+</html>

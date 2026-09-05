@@ -1,1 +1,28 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Overview — BlackBox Docs</title><link rel="stylesheet" href="../styles.css"></head><body><header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark"></span><span>BLACKBOX</span></a><nav><a href="../docs.html">Docs</a><a href="../security.html">Security</a></nav><a class="button button-small button-outline" href="../app.html">Open app</a></header><main class="page-main shell docs-article"><a class="docs-back" href="../docs.html">← Back to Docs</a><div class="page-kicker">DOCS / 01 / OVERVIEW</div><h1>A permission is a<br><em>small contract promise.</em></h1><p class="page-lede">A protocol defines one allowed action. A capability pass lets its holder trigger that action, while the Gatekeeper rejects everything outside the public rule.</p><section class="security-list"><div><span>01</span><h2>Issuer</h2><p>Defines the target, allowed action, cap, expiry, and whether the pass is reusable.</p></div><div><span>02</span><h2>Holder</h2><p>Receives a one-unit STRK20 private note representing that permission.</p></div><div><span>03</span><h2>Gatekeeper</h2><p>Checks fresh delivery and the public policy before it forwards the allowed call.</p></div></section><a class="docs-next" href="./integrate.html"><span>NEXT</span><strong>Integrate a target →</strong></a></main></body></html>
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="How BlackBox policies, private capability passes, wallets, and the Gatekeeper work together."><title>Overview | BlackBox Docs</title><link rel="stylesheet" href="../styles.css"></head>
+<body>
+  <header class="site-header"><a class="brand" href="../index.html"><span class="brand-mark"></span><span>BLACKBOX</span></a><nav><a href="../docs.html">Docs</a><a href="../security.html">Security</a></nav><a class="button button-small button-outline" href="../app.html">My capabilities</a></header>
+  <main class="page-main shell docs-article">
+    <a class="docs-back" href="../docs.html">← Back to Docs</a><div class="page-kicker">DOCS / 01 / OVERVIEW</div>
+    <h1>A permission is a<br><em>small contract promise.</em></h1>
+    <p class="page-lede">A protocol defines one allowed action. A capability pass lets its holder trigger that action, while the Gatekeeper rejects everything outside the public rule.</p>
+    <section aria-labelledby="map-heading">
+      <div class="docs-section-heading"><div class="section-index">PROTOCOL MAP</div><h2 id="map-heading">From a public rule to one bounded action.</h2><p>The wallet handles the private note and proof. BlackBox’s contracts own the policy checks and permitted execution.</p></div>
+      <div class="protocol-map">
+        <article class="protocol-node"><span>01 / ISSUER</span><h3>Defines the job</h3><p>Chooses the target, selector, cap, expiry, recipient, and reuse mode.</p></article>
+        <article class="protocol-node"><span>02 / POLICY</span><h3>Stores public limits</h3><p>The Gatekeeper records the exact boundaries that every use must satisfy.</p></article>
+        <article class="protocol-node"><span>03 / PRIVATE PASS</span><h3>Moves to a holder</h3><p>A one-unit STRK20 note represents authority to request that job.</p></article>
+        <article class="protocol-node"><span>04 / WALLET</span><h3>Builds the proof</h3><p>The holder wallet proves fresh pass delivery without giving BlackBox the note plaintext.</p></article>
+        <article class="protocol-node"><span>05 / GATEKEEPER</span><h3>Enforces and forwards</h3><p>Only a valid, in-policy request reaches the protected adapter or contract.</p></article>
+      </div>
+      <div class="privacy-legend">
+        <article><strong>PUBLIC ONCHAIN</strong><p>Policy limits, contract addresses, shielding or deposit address, token and amount, and the final target action remain public.</p></article>
+        <article><strong>PRIVATE BOUNDARY</strong><p>The private note and its ownership stay inside the privacy wallet. Sender separation also depends on the wallet’s relay path.</p></article>
+      </div>
+    </section>
+    <section aria-labelledby="roles-heading"><div class="docs-section-heading"><div class="section-index">THREE RESPONSIBILITIES</div><h2 id="roles-heading">Each part has one job.</h2></div><div class="security-list"><div><span>01</span><h2>Issuer</h2><p>Defines the target, allowed action, cap, expiry, and whether the pass is reusable.</p></div><div><span>02</span><h2>Holder wallet</h2><p>Owns the private note, prepares proof-backed execution, and asks the holder to confirm.</p></div><div><span>03</span><h2>Gatekeeper</h2><p>Checks fresh delivery and the public policy before forwarding only the allowed call.</p></div></div></section>
+    <a class="docs-next" href="./integrate.html"><span>NEXT</span><strong>Integrate a target →</strong></a>
+  </main>
+</body>
+</html>

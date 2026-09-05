@@ -1,42 +1,35 @@
-# Contributing to BlackBox Protocol
+# Contributing
 
-BlackBox is a Starknet protocol primitive. Changes to its privacy claims and
-authorization path need evidence, not optimistic copy.
+BlackBox authorization is enforced by Cairo. The web apps and SDK can validate
+inputs and explain the policy, but they must not become the source of authority.
 
 ## Before opening a change
 
-1. Read [`docs/VNEXT_PROTOCOL.md`](docs/VNEXT_PROTOCOL.md),
-   [`docs/PRIVACY_MODEL.md`](docs/PRIVACY_MODEL.md), and
-   [`docs/NETWORKS.md`](docs/NETWORKS.md).
-2. Do not add a signer, viewing key, mnemonic, credential, note plaintext, or
-   prompt/strategy material to source, fixtures, browser storage, or logs.
-3. Do not describe a STRK20 deposit as private: its depositing address, token,
-   and amount are public.
-4. Keep policy enforcement in Cairo. The SDK and web app may validate and
-   display policy data, but must not become the authority.
+- Read [the architecture](docs/ARCHITECTURE.md) and
+  [privacy model](docs/PRIVACY_MODEL.md).
+- Never commit a private key, seed phrase, viewing key, note plaintext, prover
+  credential, or wallet log.
+- Do not describe a STRK20 deposit as private. Its sender, token, and amount are
+  public.
+- Mark any untested network or privacy claim as `UNVERIFIED`.
+- Keep every configurable payment field tied to a contract-enforced rule.
 
-## Verification
-
-Run the fast product gate before handing off a change:
+## Checks
 
 ```sh
+npm install
 npm run verify
+
+cd contracts
+scarb build
+snforge test
 ```
 
-For a prepared local Starknet Privacy checkout, also run:
+For the real local STRK20 path:
 
 ```sh
-npm run verify:capability
+BLACKBOX_PRIVACY_REPO=/absolute/path/to/starknet-privacy npm run verify:capability
 ```
 
-`npm run verify:mainnet-readiness` is a read-only check of mainnet identity and
-the live STRK20 pool class hash. It is not deployment approval. Never sign,
-declare, deploy, or broadcast on mainnet without the owner’s explicit approval.
-
-## Contract changes
-
-For a new protected target, add an adapter with fixed dependencies wherever
-possible, then test at least: wrong caller, wrong target/selector, over-limit,
-expired policy, revoked policy, replay, and a preloaded token delivery from an
-earlier transaction. Update `docs/STATUS.md` with the exact evidence and mark
-any untested network or privacy claim `UNVERIFIED`.
+Contract changes should cover wrong caller, wrong target, wrong selector,
+over-limit payment, expiry, revocation, replay, and stale pass delivery.

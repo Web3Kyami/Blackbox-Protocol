@@ -1,5 +1,5 @@
 // =============================================================================
-// Studio dashboard — pure render layer (Phase 5)
+// Studio dashboard render layer.
 // =============================================================================
 //
 // Renders the organization policy dashboard as a pure function of state:

@@ -12,13 +12,7 @@ const sdkDist = join(privacyRoot, "sdk/dist");
 export default {
   root: e2eRoot,
   test: {
-    include: [
-      join(packageRoot, "test/stage-a-session.test.ts"),
-      join(packageRoot, "test/stage-b-dashboard.test.ts"),
-      join(packageRoot, "test/stage-c-lifecycle.test.ts"),
-      join(packageRoot, "test/blackbox-arena.test.ts"),
-      join(packageRoot, "test/capability-protocol.test.ts"),
-    ],
+    include: [join(packageRoot, "test/capability-protocol.test.ts")],
     fileParallelism: false,
     hookTimeout: 120000,
     testTimeout: 120000,

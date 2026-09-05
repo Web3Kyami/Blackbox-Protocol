@@ -34,7 +34,7 @@ const studioRoot = join(here, "..");
 const STUDIO_WALLET = join(studioRoot, "src/wallet/wallet-utils.mjs");
 const UPSTREAM_WALLET = join(studioRoot, "..", "..", "apps", "web", "src", "wallet-operator.mjs");
 
-// Upstream sha256 of wallet-operator.mjs, snapshotted 2026-08-28.
+// Expected sha256 of the upstream wallet helper.
 const UPSTREAM_WALLET_SHA256 =
   "ae1128a94f9d2cc7fadb0cb0a446d7177e9a6c3b3c8f7f55fd7d724e7270891a";
 

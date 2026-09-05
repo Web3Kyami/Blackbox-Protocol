@@ -1,5 +1,5 @@
 {
-  "label": "EXAMPLE ONLY — replace every address and verify the live network",
+  "label": "EXAMPLE ONLY: replace every address and verify the live network",
   "deployment": {
     "network": "EXAMPLE_ONLY",
     "privacyPool": "0x111",

@@ -1,4 +1,4 @@
-// Phase 7 — Dynamic holder experience (tests).
+// Holder experience tests.
 //
 // Evidence gate (falsifiable, no fake reads):
 //   - renderHolder returns the correct banner for each of the 6 holder states.
@@ -22,7 +22,7 @@ const GATEKEEPER = "0x226b161a1e762b0f15dd7e73f3fe182e0a6596e202e6307a014ace42e7
 const ADAPTER = "0x278c26f08c026e3086fe5690a5efc800b87e05e872fde67c26eb245ac269375";
 const MAINNET_STRK = "0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d";
 
-// Build a normalized record (Phase 5/7 shape) from a raw policy for offline tests.
+// Build a normalized record from a raw policy for offline tests.
 // Uses a far-future expiresAt so the SDK's validatePolicy accepts it (the
 // SDK validates positive u64s; live reads assert the real chain value.
 function fakeRecord(policyOverride = {}) {

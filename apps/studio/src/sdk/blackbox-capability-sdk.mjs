@@ -4,9 +4,7 @@
 //
 // This file is a copy of the upstream SDK that lives at
 //   ../../packages/capability-sdk/src/index.mjs
-// (relative to this file), inside the parent BlackBox Arena repo.
-//
-// Snapshot captured on 2026-08-28.
+// (relative to this file), inside the parent BlackBox Protocol repository.
 //
 // Upstream identity
 // -----------------

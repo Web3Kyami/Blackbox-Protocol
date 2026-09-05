@@ -1,11 +1,4 @@
-/* =============================================================================
-   Studio styles — light workspace, daylight treasury control room
-   =============================================================================
-   Token reference: docs/UI_DIRECTION.md §"Visual system".
-   This is the Phase 1 baseline. The dedicated visual-design skill
-   (referenced in HANDOFF.md Phase 3) will rework this when we have
-   a real visual brief to work from.
-   ========================================================================== */
+/* BlackBox Studio workspace styles. */
 
 :root {
   --canvas:        #F5F7FA;
@@ -51,7 +44,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ----- Studio shell (single page in Phase 1) --------------------------- */
+/* Studio shell */
 
 .studio-shell {
   min-height: 100vh;

@@ -1,6 +1,6 @@
-// Phase 5 — dashboard render test (PURE, no network)
+// Dashboard render tests. These do not use the network.
 //
-// Verifies the dashboard render layer against the Phase 5 gate:
+// Verifies the dashboard render layer:
 //   - never invents rows (empty state when count === 0)
 //   - shows REAL org-owned data only
 //   - renders lifecycle states, budget/uses/expiry, addresses, receipts,
@@ -11,7 +11,6 @@
 // This test does NOT touch the network. It feeds synthetic-but-shaped index
 // records (matching the output of org-policy-indexer.mjs) into renderDashboard
 // and asserts the tree shape. The real-on-chain assertion lives in
-// phase-5-indexer.test.mjs.
 
 import test from "node:test";
 import assert from "node:assert/strict";

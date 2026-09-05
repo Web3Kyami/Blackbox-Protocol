@@ -1,8 +1,8 @@
-// Phase 1 smoke tests for the Studio wizard.
+// Studio wizard tests.
 // All tests exercise the pure render layer in src/ui/wizard.mjs.
 // No DOM, no jsdom, no browser. If these pass, the wizard structure
 // is correct; the actual visual rendering is verified separately by
-// opening the page in a real browser (Phase 1.9 — optional).
+// opening the page in a real browser.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -182,11 +182,11 @@ test("reduce toggle-ack flips the boundary acknowledgement", () => {
   assert.equal(s2.acknowledgedBoundary, false);
 });
 
-// ---- 8. Submit is a no-op in Phase 1 (no wallet). -----------------------
+// Submit remains a reducer no-op because the browser layer handles the wallet.
 test("reduce submit-skeleton does not change state", () => {
   const s0 = { ...initialState(), step: 5, acknowledgedBoundary: true, plan: { gatekeeper: "x" } };
   const s1 = reduce(s0, { type: "submit-skeleton" });
-  assert.deepEqual(s1, s0, "submit is a no-op in Phase 1");
+  assert.deepEqual(s1, s0, "the browser layer handles submission");
 });
 
 // ---- 9. computePlan: returns a helpful error when the treasury is empty. -
@@ -262,8 +262,8 @@ test("computePlan refuses to predict when the capability mode is missing", () =>
   assert.match(result.error, /behavior|mode|reusable|one-shot/i);
 });
 
-// ---- 10. computePlan: calls the real SDK shape (Phase 3). -----------------
-// Phase 3 — the SDK input must include EVERY field the upstream
+// computePlan calls the real SDK shape.
+// The SDK input must include every field the upstream
 // `buildTreasuryDeploymentPlan` declares: network, privacyPool,
 // issuer, treasury, asset, recipient, capabilityName,
 // capabilitySymbol, maxAmount, expiresAt, supply,
@@ -324,7 +324,7 @@ test("computePlan calls buildTreasuryDeploymentPlan with the full real SDK input
 });
 
 // ---- 10b. End-to-end: the REAL SDK returns the shape the
-// wizard renders. (Phase 3 gate evidence — closes the
+// wizard renders. This closes the
 // mutation-test gap from a synthetic-plan test.) ----
 // Test 10 above exercises the wizard's input shape against a
 // fake SDK; this test calls the real local SDK with a valid
@@ -371,7 +371,7 @@ test("real SDK end-to-end: returns the 3+3+3 UNSIGNED_PLAN shape (gate evidence)
     "capabilityToken",
   ]);
   // The 3 setup calls, in order. The third (mint) is the
-  // Phase 3.4 gate item — the real SDK must return it; the
+  // The real SDK must return this field. The
   // rail must render it.
   assert.equal(plan.setupCalls.length, 3);
   assert.equal(plan.setupCalls[0].entrypoint, "register_policy");
@@ -435,7 +435,7 @@ test("computePlan catches SDK throws and returns a planError", () => {
 });
 
 // ---- 12. The review step's rail surfaces the real plan structure. --------
-// Phase 3 — the rail reads from the real UNSIGNED_PLAN shape:
+// The rail reads from the real UNSIGNED_PLAN shape:
 // declarations (with class hashes), deployments (with constructor
 // args), setup calls (with entrypoint + signer role), and the
 // requiresOwnerApproval banner. The test must assert each of these
@@ -508,7 +508,7 @@ test("review-step render includes the real predicted deployment plan rail when p
   // The real SDK returns THREE setup calls — register_policy,
   // approve, mint. The third is the issuer-signed mint to
   // initialise the private capability supply; this is the
-  // "mint plan" the IMPLEMENTATION_PLAN Phase 3 gate requires.
+  // mint plan used by the deployment review.
   const setup0 = findByTestId(tree, "rail-setup-0");
   const setup1 = findByTestId(tree, "rail-setup-1");
   const setup2 = findByTestId(tree, "rail-setup-2");
@@ -742,7 +742,7 @@ test("wizard.mjs source contains no browser-global references", () => {
 });
 
 // ---- 27. publicConfiguration: deterministic, no secrets, schema complete. -
-// Phase 3 — the JSON export must round-trip into a stable shape, and
+// The JSON export must round-trip into a stable shape, and
 // must NEVER contain signer material, private keys, or anything that
 // could leak. We freeze the export and check the shape so any
 // future drift fails loud.
@@ -797,7 +797,7 @@ test("publicConfiguration returns null when no plan is provided", () => {
 });
 
 // ---- 29. calldataExport: produces developer-readable, ordered output. -----
-// Phase 3 — the export is what a developer pastes into a deploy
+// The export is what a developer adapts in a deploy
 // script. It must list declarations, deployments, and setup calls
 // in the order a wallet would execute them. We assert that order
 // invariant so a future re-ordering fails loud.
@@ -840,7 +840,7 @@ test("calldataExport lists declarations, deployments, then setup calls in order"
   //   // signer=<role> target=<contract> entrypoint=<name>
   assert.match(out, /signer=issuer target=\$gatekeeper entrypoint=register_policy/);
   assert.match(out, /signer=treasury target=0xASSET entrypoint=approve/);
-  // The third setup call is the issuer-signed mint. Phase 3 gate
+  // The third setup call is the issuer-signed mint.
   // requires a mint plan; this is the proof the export covers it.
   assert.match(out, /signer=issuer target=\$capabilityToken entrypoint=mint/);
   // Privacy steps are listed.

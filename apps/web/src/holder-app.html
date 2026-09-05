@@ -1,1 +1,49 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>App — BlackBox</title><link rel="stylesheet" href="./styles.css"></head><body><header class="site-header"><a class="brand" href="./index.html"><span class="brand-mark"></span><span>BLACKBOX</span></a><nav><a href="./use-cases.html">Use cases</a><a href="./docs.html">Docs</a><a href="./security.html">Security</a></nav><span class="app-network">MAINNET ONLY</span></header><main class="app-shell shell"><section class="app-intro"><div><div class="page-kicker">MY CAPABILITIES</div><h1>Your permissions,<br><em>in one place.</em></h1><p>Connect a compatible Starknet privacy wallet to see capability passes available to you.</p></div><div class="wallet-card"><small>WALLET</small><select id="wallet-select"><option value="">Detecting wallets…</option></select><button id="wallet-connect" class="button button-primary">Connect wallet</button><div class="connection-facts"><div><span>ACCOUNT</span><strong id="wallet-account">Not connected</strong></div><div><span>NETWORK</span><strong id="wallet-network">Unknown</strong></div><div><span>WALLET API</span><strong id="wallet-api">Unchecked</strong></div></div></div></section><section class="capability-dashboard"><div class="dashboard-heading"><div><small>AVAILABLE TO YOU</small><h2>Capabilities</h2></div><span id="capability-status">CONNECT A WALLET</span></div><div id="capability-state" class="empty-capability"><div class="empty-mark">B</div><h3>No capability loaded</h3><p>Connect a compatible wallet. When a deployed BlackBox policy gives this wallet a private pass, it appears here with one clear action—not raw calldata.</p><a href="./docs/use-a-capability.html">How capability use works →</a></div></section><section class="app-boundary"><strong>What this app does</strong><p>It shows your pass and asks the wallet to review the permitted action. The wallet owns private notes, proofs, and submission. No private key, viewing key, or note plaintext is stored here.</p></section></main><footer class="site-footer shell site-footer-expanded"><div class="brand"><span class="brand-mark"></span><span>BLACKBOX</span></div><div class="footer-links"><a href="./docs.html">Docs</a><a href="./security.html">Security</a><a href="#" aria-disabled="true">GitHub · soon</a><a href="#" aria-disabled="true">X · soon</a><a href="#" aria-disabled="true">Founder site · soon</a><a href="#" aria-disabled="true">Contact · soon</a></div></footer><script type="module" src="./holder-app.mjs"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App | BlackBox</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="./index.html"><span class="brand-mark"></span><span>BLACKBOX</span></a>
+    <nav><a href="./use-cases.html">Use cases</a><a href="./docs.html">Docs</a><a href="./security.html">Security</a></nav>
+  </header>
+  <main class="app-shell shell">
+    <section class="app-intro">
+      <div>
+        <div class="page-kicker">MY CAPABILITIES</div>
+        <h1>Your permissions,<br><em>in one place.</em></h1>
+        <p>Connect the wallet that received a BlackBox pass to review its bounded payment permission.</p>
+      </div>
+      <div class="wallet-card">
+        <small>PASS HOLDER WALLET</small>
+        <select id="wallet-select"><option value="">Detecting wallets…</option></select>
+        <button id="wallet-connect" class="button button-primary">Connect wallet</button>
+        <div class="connection-facts">
+          <div><span>ACCOUNT</span><strong id="wallet-account">Not connected</strong></div>
+          <div><span>NETWORK</span><strong id="wallet-network">Unknown</strong></div>
+        </div>
+      </div>
+    </section>
+    <section class="capability-dashboard">
+      <div class="dashboard-heading"><div><small>AVAILABLE TO YOU</small><h2>Capabilities</h2></div><span id="capability-status">CONNECT WALLET</span></div>
+      <div id="capability-state" class="empty-capability">
+        <div class="empty-mark">B</div>
+        <h3>Connect the recipient wallet</h3>
+        <p>After the pass holder wallet is connected, this panel will show the next permitted action. The wallet keeps and checks the private pass; BlackBox never reads its notes or viewing keys.</p>
+        <button id="exercise-pass" class="button button-primary" type="button" disabled hidden>Exercise fixed 0.01 STRK payment</button>
+        <p><a href="./issue.html">Issuer: send a private pass →</a></p>
+      </div>
+    </section>
+    <section class="app-boundary"><strong>What this app does</strong><p>It shows the permitted action and asks the wallet to review it. The wallet owns private notes, proofs, and submission. No private key, viewing key, or note plaintext is stored here.</p></section>
+  </main>
+  <footer class="site-footer shell site-footer-expanded">
+    <div class="brand"><span class="brand-mark"></span><span>BLACKBOX</span></div>
+    <div class="footer-links"><a href="./docs.html">Docs</a><a href="./security.html">Security</a><a href="https://github.com/Web3Kyami/Blackbox-Protocol" rel="noreferrer">GitHub</a><a href="https://x.com/Web3Kyami" rel="noreferrer">X</a><a href="mailto:web3kyami@gmail.com">Email</a></div>
+  </footer>
+  <script type="module" src="./holder-app.mjs"></script>
+</body>
+</html>

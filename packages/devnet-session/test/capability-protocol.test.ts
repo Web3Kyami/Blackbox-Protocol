@@ -8,7 +8,7 @@ import {
   type E2eTestEnv,
 } from "../src/harness.js";
 import {
-  arenaRepoRoot,
+  projectRoot,
   declareClass,
   deployContract,
   executeAndWait,
@@ -17,7 +17,7 @@ import {
 import { join } from "path";
 import { readFileSync } from "fs";
 
-const CONTRACTS_DEV_DIR = join(arenaRepoRoot(), "contracts/target/dev");
+const CONTRACTS_DEV_DIR = join(projectRoot(), "contracts/target/dev");
 const PREFIX = "blackbox_arena_contracts";
 
 function artifact(name: string, compiled = false): string {

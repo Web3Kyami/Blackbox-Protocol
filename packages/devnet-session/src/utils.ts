@@ -13,7 +13,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export function arenaRepoRoot(): string {
+export function projectRoot(): string {
   return join(__dirname, "../../..");
 }
 

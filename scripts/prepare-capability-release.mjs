@@ -72,7 +72,7 @@ const manifest = {
   requiredVerification: [
     "cd contracts && scarb build && scarb test",
     "npm run verify",
-    "npm run verify:devnet",
+    "npm run verify:capability",
     "independently recompute class hashes from the listed artifacts",
     "verify live STRK20 pool and service compatibility",
     "obtain explicit owner approval before any mainnet signature",

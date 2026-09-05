@@ -1,25 +1,5 @@
-// =============================================================================
-// Studio entry — browser-only
-// =============================================================================
-//
-// This is the page entry point. Loaded by `index.html` via
-// `<script type="module" src="./src/ui/app.mjs"></script>`.
-//
-// Responsibilities:
-//   1. Load the local Studio SDK copy (which itself copies the
-//      upstream BlackBox SDK byte-for-byte, see apps/studio/src/sdk/
-//      README banner).
-//   2. Build the initial wizard state. The draft is empty; the
-//      plan is null until the user reaches the review step.
-//   3. Wire the dispatch loop: events flow from DOM -> reducer ->
-//      new tree -> re-render.
-//   4. When the user reaches the review step, compute the predicted
-//      deployment plan via the SDK and push it into state.
-//
-// Phase 1 has no wallet, no chain call, and no submit. The Continue
-// button on the final step is wired to a no-op reducer that returns
-// the same state; the label explicitly says "awaiting wallet — Phase 2".
-// =============================================================================
+// Browser entry point for the Studio wizard, dashboard, pass delivery, and
+// holder payment flow.
 
 import { mount } from "./mount.mjs";
 import {
@@ -39,7 +19,7 @@ import { renderPassDelivery } from "./pass-delivery.mjs";
 import { readRuntimeNetworkConfig } from "../sdk/public-config.mjs";
 import { readUiRecovery, writeUiRecovery } from "./recovery.mjs";
 
-// Phase 5 — map app state into the dashboard render shape.
+// Map app state into the dashboard render shape.
 function dashboardState(s) {
   return {
     org: s.wallet?.address || null,
@@ -50,10 +30,7 @@ function dashboardState(s) {
   };
 }
 
-// Phase 4 — module-scope state references so runDeployLoop
-// (defined at module scope for the same reason) can read &
-// mutate them. These are assigned by boot() and never
-// referenced before that.
+// Shared browser state used by asynchronous wallet and network operations.
 let appState = null;
 let appMount = null;
 let appReRender = null;
@@ -241,7 +218,7 @@ function updateWalletLabel(wallet) {
     : "Not connected";
 }
 
-// Phase 5 — load the connected org's REAL on-chain policies. Read-only RPC.
+// Load the connected treasury's onchain policies through read-only RPC calls.
 // Updates appState.dashboard and re-renders. Never fabricates rows.
 async function loadDashboard(org, networkConfig) {
   if (!org) return;
@@ -274,8 +251,6 @@ async function loadDashboard(org, networkConfig) {
 function boot() {
   const target = document.getElementById("studio");
   if (!target) {
-    // Surface clearly. In Phase 2, when we have telemetry, this
-    // becomes a real error. For now, log and stop.
     console.error("Studio: mount target #studio not found");
     return;
   }
@@ -286,7 +261,7 @@ function boot() {
     networkConfig: readRuntimeNetworkConfig(),
     draft: savedProgress?.publicDraft || recoveredUi?.draft || undefined,
   });
-  // Phase 5 — view switch: "wizard" (default) or "dashboard".
+  // Restore the current view and shared policy from browser recovery state.
   const url = new URL(window.location.href);
   const sharedPolicy = url.searchParams.get("policy");
   const recoveredView = recoveredUi?.view || "home";
@@ -310,9 +285,7 @@ function boot() {
     mainnet: { deployment: savedProgress, pending: null, error: null, lastTransaction: null },
     walletPicker: { open: false, options: [] },
   };
-  // Phase 4 — expose the live references to runDeployLoop
-  // (which lives at module scope so it can be called
-  // asynchronously without an explicit state argument).
+  // Expose live references to asynchronous wallet operations.
   appState = state;
   updateWalletLabel(state.wallet);
   const root = document.getElementById("studio");
@@ -334,13 +307,7 @@ function boot() {
       // that current snapshot instead of the render that originally attached
       // this listener.
       state = appState || state;
-      // Phase 2: wallet connection. The "connect-wallet-request"
-      // event is dispatched by the Treasury step's connect button.
-      // We handle it here (browser-only) because it needs
-      // window.starknet. This is a *connection request only* —
-      // enable() does not send any transaction and performs no
-      // Mainnet write. Per AGENTS.md, no Mainnet writes happen
-      // without explicit per-action approval; this is not one.
+      // Wallet connection does not send a transaction or perform a Mainnet write.
       if (event.type === "connect-wallet-request") {
         state = { ...state, walletPicker: { open: true, error: null, options: availableWallets.map((wallet) => ({ name: wallet.name })) } };
         appState = state;
@@ -582,11 +549,7 @@ function boot() {
         appState = state; appMount.setTree(reRender(state)); return;
       }
 
-      // Phase 3 — copy-export: writes the public configuration JSON
-      // or the SDK calldata snippet to the browser clipboard. The
-      // wizard already has the text in the rail; this branch is the
-      // browser-only glue between the click and navigator.clipboard.
-      // No signing, no chain call, no Mainnet write.
+      // Copy the public configuration or calldata without signing or broadcasting.
       if (event.type === "copy-export") {
         try {
           const text =
@@ -638,8 +601,7 @@ function boot() {
         return;
       }
 
-      // Phase 7 — holder experience. Load a policy from a shared-link token
-      // (read-only), then exercise it via the real Wallet API action builder.
+      // Load a shared policy, then exercise it through the Wallet API action builder.
       if (event.type === "holder-token") {
         const h0 = state.holder || {};
         state = { ...state, holder: { ...h0, token: event.value, error: null } };

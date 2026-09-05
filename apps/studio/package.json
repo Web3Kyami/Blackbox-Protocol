@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "User-first self-service layer over the existing BlackBox Protocol. See apps/studio/docs/PHASE0_ARCHITECTURE.md.",
+  "description": "Self-service treasury mandate interface for BlackBox Protocol.",
   "engines": {
     "node": ">=22"
   },
@@ -16,8 +16,8 @@
     "test:sdk-parity": "node --test test/sdk-parity.test.mjs",
     "test:wallet-parity": "node --test test/wallet-utils-parity.test.mjs",
     "test:secret-scan": "node --test test/secret-scan.test.mjs",
-    "test:phase-1-smoke": "node --test test/phase-1-smoke.test.mjs",
-    "test:phase-5": "node --test test/phase-5-dashboard.test.mjs"
+    "test:wizard": "node --test test/wizard.test.mjs",
+    "test:dashboard": "node --test test/dashboard.test.mjs"
   },
   "dependencies": {
     "@starknet-io/get-starknet-discovery": "6.0.2",
