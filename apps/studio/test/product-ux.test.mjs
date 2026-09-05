@@ -33,6 +33,17 @@ test("workspace exposes distinct treasury, creation, and operator navigation", (
   assert.match(value, /Connect wallet/);
 });
 
+test("wallet picker distinguishes discovery from an empty result and offers retry", () => {
+  const loading = text(renderShell({ tag: "p", attrs: {}, children: ["content"] }, { view: "home", walletPicker: { open: true, loading: true, options: [] } }));
+  assert.match(loading, /Checking installed wallets/);
+  assert.doesNotMatch(loading, /No compatible Starknet wallet was detected/);
+
+  const empty = text(renderShell({ tag: "p", attrs: {}, children: ["content"] }, { view: "home", walletPicker: { open: true, loading: false, options: [] } }));
+  assert.match(empty, /No compatible Starknet wallet was detected/);
+  assert.match(empty, /Check again/);
+  assert.match(empty, /connect-wallet-request/);
+});
+
 test("mandate detail prioritizes pass delivery before operator-link sharing", () => {
   const value = text(renderMandateDetail({ mandate: record }));
   assert.match(value, /Issue private pass/);

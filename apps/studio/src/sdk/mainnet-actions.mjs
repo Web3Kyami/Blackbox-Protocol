@@ -63,10 +63,14 @@ export function deploymentKey(draft = {}) {
 }
 
 export function discoverWallets(onChange) {
-  const store = createStore({ eip1193Adapters: [] });
+  const store = createStore();
   const clean = (items) => items.filter((wallet) => wallet?.name && typeof wallet?.features?.["starknet:walletApi"]?.request === "function");
   if (onChange) store.subscribe((items) => onChange(clean(items.slice())));
-  return { store, wallets: clean(store.getWallets().slice()) };
+  const refresh = () => {
+    store._refreshInjectedWallets?.();
+    return clean(store.getWallets().slice());
+  };
+  return { store, wallets: refresh(), refresh };
 }
 
 export async function connectMainnetWallet(wallet) {

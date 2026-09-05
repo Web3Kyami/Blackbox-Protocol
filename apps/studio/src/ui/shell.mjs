@@ -44,7 +44,13 @@ export function renderShell(content, state = {}) {
             h("header", {}, [h("div", {}, [h("span", { class: "studio-kicker" }, ["CHOOSE WALLET"]), h("h2", {}, ["Connect to Mainnet"])]), h("button", { class: "text-button", onclick: { type: "wallet-picker-close" } }, ["Close"])]),
             ...(state.walletPicker.options || []).map((wallet, index) => h("button", { class: "wallet-choice", onclick: { type: "wallet-picker-select", index } }, [h("strong", {}, [wallet.name]), h("span", {}, ["Connect"])])),
             state.walletPicker.error ? h("p", { class: "delivery-blocker" }, [state.walletPicker.error]) : null,
-            !(state.walletPicker.options || []).length ? h("p", {}, ["Unlock a compatible Starknet wallet, then reopen this list."]) : null,
+            state.walletPicker.loading ? h("p", { class: "wallet-discovery-status", role: "status" }, ["Checking installed wallets..."]) : null,
+            !state.walletPicker.loading && !(state.walletPicker.options || []).length
+              ? h("div", { class: "wallet-discovery-empty" }, [
+                  h("p", {}, ["No compatible Starknet wallet was detected. Check that the extension is allowed on this site, then try again."]),
+                  h("button", { class: "btn btn--secondary btn--small", onclick: { type: "connect-wallet-request" } }, ["Check again"]),
+                ])
+              : null,
           ]),
         ])
       : null,

@@ -18,6 +18,7 @@ import {
   deliveryTransactionFromEvents,
   paymentTransactionFromEvents,
   recoverSubmittedPayment,
+  discoverWallets,
 } from "../src/sdk/mainnet-actions.mjs";
 import { renderHolder } from "../src/ui/holder.mjs";
 
@@ -26,6 +27,34 @@ test("Studio is pinned to verified Mainnet classes", () => {
   assert.match(MAINNET_CLASSES.CapabilityGatekeeper, /^0x[0-9a-f]+$/);
   assert.match(MAINNET_CLASSES.CapabilityToken, /^0x[0-9a-f]+$/);
   assert.match(MAINNET_CLASSES.TreasurySpendAdapter, /^0x[0-9a-f]+$/);
+});
+
+test("wallet discovery finds an extension injected after the first scan", () => {
+  const originalWindow = globalThis.window;
+  const browserWindow = new EventTarget();
+  globalThis.window = browserWindow;
+  try {
+    const discovery = discoverWallets();
+    assert.equal(discovery.wallets.length, 0);
+
+    Object.defineProperty(browserWindow, "starknet_braavos", {
+      configurable: true,
+      value: {
+        id: "braavos",
+        name: "Braavos",
+        version: "1.0.0",
+        icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>",
+        request: async () => [],
+        on: () => {},
+        off: () => {},
+      },
+    });
+
+    assert.deepEqual(discovery.refresh().map((wallet) => wallet.name), ["Braavos"]);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+  }
 });
 
 test("STRK amounts use exact 18-decimal integer conversion", () => {

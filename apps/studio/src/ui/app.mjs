@@ -35,7 +35,7 @@ let appState = null;
 let appMount = null;
 let appReRender = null;
 let availableWallets = [];
-let walletDiscovery = null;
+let walletDiscoveryPromise = null;
 let mainnetSession = null;
 const MAINNET_PROGRESS_KEY = "blackbox.studio.mainnet.deployment.v1";
 const MAINNET_MANDATES_KEY = "blackbox.studio.mainnet.mandates.v1";
@@ -218,6 +218,26 @@ function updateWalletLabel(wallet) {
     : "Not connected";
 }
 
+function startWalletDiscovery() {
+  if (walletDiscoveryPromise) return walletDiscoveryPromise;
+  walletDiscoveryPromise = import("../sdk/mainnet-actions.mjs").then(({ discoverWallets }) => {
+    const found = discoverWallets((wallets) => {
+      availableWallets = wallets;
+      if (appState?.walletPicker?.open) {
+        appState = { ...appState, walletPicker: { open: true, loading: false, error: null, options: wallets.map((wallet) => ({ name: wallet.name })) } };
+        appMount?.setTree(appReRender(appState));
+      }
+    });
+    availableWallets = found.wallets;
+    return found;
+  }).catch((error) => {
+    walletDiscoveryPromise = null;
+    availableWallets = [];
+    throw error;
+  });
+  return walletDiscoveryPromise;
+}
+
 // Load the connected treasury's onchain policies through read-only RPC calls.
 // Updates appState.dashboard and re-renders. Never fabricates rows.
 async function loadDashboard(org, networkConfig) {
@@ -309,7 +329,20 @@ function boot() {
       state = appState || state;
       // Wallet connection does not send a transaction or perform a Mainnet write.
       if (event.type === "connect-wallet-request") {
-        state = { ...state, walletPicker: { open: true, error: null, options: availableWallets.map((wallet) => ({ name: wallet.name })) } };
+        state = { ...state, walletPicker: { open: true, loading: true, error: null, options: availableWallets.map((wallet) => ({ name: wallet.name })) } };
+        appState = state;
+        appMount.setTree(reRender(state));
+        try {
+          const discovery = await startWalletDiscovery();
+          availableWallets = discovery?.refresh?.() || discovery?.wallets || availableWallets;
+          if (!appState?.walletPicker?.open) return;
+          state = appState;
+          state = { ...state, walletPicker: { open: true, loading: false, error: null, options: availableWallets.map((wallet) => ({ name: wallet.name })) } };
+        } catch {
+          if (!appState?.walletPicker?.open) return;
+          state = appState;
+          state = { ...state, walletPicker: { open: true, loading: false, error: "Wallet discovery could not start. Check this site's extension permissions, then try again.", options: [] } };
+        }
         appState = state;
         appMount.setTree(reRender(state));
         return;
@@ -831,17 +864,7 @@ function boot() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") persistCurrentScreen();
   });
-  import("../sdk/mainnet-actions.mjs").then(({ discoverWallets }) => {
-    const found = discoverWallets((wallets) => {
-      availableWallets = wallets;
-      if (appState?.walletPicker?.open) {
-        appState = { ...appState, walletPicker: { open: true, options: wallets.map((wallet) => ({ name: wallet.name })) } };
-        appMount?.setTree(appReRender(appState));
-      }
-    });
-    walletDiscovery = found.store;
-    availableWallets = found.wallets;
-  }).catch(() => { availableWallets = []; });
+  startWalletDiscovery().catch(() => {});
   if (restoredHolderToken) preloadHolderPolicy(restoredHolderToken, state.networkConfig);
 }
 
